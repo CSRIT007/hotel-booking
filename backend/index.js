@@ -179,7 +179,17 @@ app.get('/api/bookings', async (req, res) => {
     const userId = req.query.user_id
     if (userId) {
       const r = await pool.query(
-        'SELECT * FROM bookings WHERE user_id = $1 ORDER BY created_at DESC',
+        `SELECT b.id, b.user_id, b.room_id,
+                to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
+                to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
+                b.guests, b.total_price, b.status, b.created_at,
+                r.name AS room_name, r.image AS room_image,
+                h.name AS hotel_name
+         FROM bookings b
+         JOIN rooms r ON b.room_id = r.id
+         JOIN hotels h ON r.hotel_id = h.id
+         WHERE b.user_id = $1
+         ORDER BY b.created_at DESC`,
         [userId]
       )
       return res.json(r.rows)
@@ -187,6 +197,8 @@ app.get('/api/bookings', async (req, res) => {
     // Admin: all bookings with user and room info
     const r = await pool.query(
       `SELECT b.*, u.username, u.email,
+        to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
+        to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
         r.name AS room_name, r.price AS room_price,
         h.name AS hotel_name
        FROM bookings b
@@ -212,7 +224,44 @@ app.patch('/api/bookings/:id', async (req, res) => {
       [status, req.params.id]
     )
     if (!r.rows[0]) return res.status(404).json({ error: 'Booking not found' })
-    res.json(r.rows[0])
+    const booking = r.rows[0]
+
+    if (status === 'confirmed' || status === 'cancelled') {
+      const details = await pool.query(
+        `SELECT r.name AS room_name, h.name AS hotel_name
+         FROM rooms r
+         JOIN hotels h ON r.hotel_id = h.id
+         WHERE r.id = $1`,
+        [booking.room_id]
+      )
+      const roomName = details.rows[0]?.room_name || 'your room'
+      const hotelName = details.rows[0]?.hotel_name || ''
+      const message =
+        status === 'confirmed'
+          ? `Your booking for ${roomName}${hotelName ? ` at ${hotelName}` : ''} is confirmed and ready.`
+          : `Your booking for ${roomName} has been cancelled.`
+      await pool.query(
+        `INSERT INTO notifications (user_id, booking_id, type, message, is_read)
+         VALUES ($1, $2, $3, $4, 0)`,
+        [booking.user_id, booking.id, status, message]
+      )
+    }
+
+    if (status === 'confirmed') {
+      await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1", [booking.room_id])
+    } else if (status === 'cancelled') {
+      const other = await pool.query(
+        `SELECT 1 FROM bookings
+         WHERE room_id = $1 AND id <> $2 AND status IN ('confirmed', 'completed')
+         LIMIT 1`,
+        [booking.room_id, booking.id]
+      )
+      if (!other.rows.length) {
+        await pool.query("UPDATE rooms SET status = 'available' WHERE id = $1 AND status = 'booked'", [booking.room_id])
+      }
+    }
+
+    res.json(booking)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -529,10 +578,53 @@ app.get('/api/finance/summary', async (_req, res) => {
   }
 })
 
+async function ensureGuestTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id INT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      type VARCHAR(20) NOT NULL CHECK (type IN ('confirmed', 'cancelled')),
+      message TEXT NOT NULL,
+      is_read SMALLINT DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+}
+
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const userId = req.query.user_id
+    if (!userId) return res.status(400).json({ error: 'user_id is required.' })
+    const r = await pool.query(
+      `SELECT id, user_id, booking_id, type, message, is_read, created_at
+       FROM notifications
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+      [userId]
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/notifications/read', async (req, res) => {
+  try {
+    const userId = req.body?.user_id || req.query.user_id
+    if (!userId) return res.status(400).json({ error: 'user_id is required.' })
+    await pool.query('UPDATE notifications SET is_read = 1 WHERE user_id = $1 AND is_read = 0', [userId])
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 pool.query('SELECT 1').then(async () => {
   await ensureFinanceTables()
+  await ensureGuestTables()
   app.listen(PORT, () => {
     console.log(`Hotel Booking API (Node + pg) at http://localhost:${PORT}`)
     console.log(`  PostgreSQL: ${process.env.PGDATABASE || 'hotel_booking'}`)

@@ -13,6 +13,18 @@
         <template v-if="isLoggedIn">
           <span class="text-sm text-stone-500">Hi, {{ currentUser?.username }}</span>
           <router-link
+            to="/my-bookings"
+            class="relative text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300"
+          >
+            My bookings
+            <span
+              v-if="unreadCount > 0"
+              class="absolute -right-2 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold text-white"
+            >
+              {{ unreadCount }}
+            </span>
+          </router-link>
+          <router-link
             v-if="isStaff"
             to="/admin"
             class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300"
@@ -57,15 +69,42 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAuth } from '../composables/useAuth'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import ThemeToggle from './ThemeToggle.vue'
 import ConfirmModal from './ConfirmModal.vue'
+import { getNotifications } from '../services/data'
 
 const { isLoggedIn, currentUser, isStaff, logout } = useAuth()
 const router = useRouter()
+const route = useRoute()
 const showLogoutConfirm = ref(false)
+const unreadCount = ref(0)
+let unreadTimer = null
+
+async function loadUnread() {
+  if (!isLoggedIn.value || !currentUser.value?.id) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const notes = await getNotifications(currentUser.value.id)
+    unreadCount.value = notes.filter((n) => Number(n.is_read) === 0).length
+  } catch {
+    unreadCount.value = 0
+  }
+}
+
+watch(isLoggedIn, loadUnread)
+watch(() => route.fullPath, loadUnread)
+onMounted(() => {
+  loadUnread()
+  unreadTimer = setInterval(loadUnread, 15000)
+})
+onUnmounted(() => {
+  if (unreadTimer) clearInterval(unreadTimer)
+})
 
 function requestLogout() {
   showLogoutConfirm.value = true

@@ -12,6 +12,7 @@ const router = createRouter({
     { path: '/contact', name: 'Contact', component: () => import('../views/ContactView.vue'), meta: { title: 'Contact' } },
     { path: '/about', name: 'About', component: () => import('../views/AboutView.vue'), meta: { title: 'About' } },
     { path: '/services', name: 'Services', component: () => import('../views/ServicesView.vue'), meta: { title: 'Services' } },
+    { path: '/my-bookings', name: 'MyBookings', component: () => import('../views/MyBookingsView.vue'), meta: { title: 'My bookings', requiresAuth: true } },
     { path: '/admin/login', name: 'AdminLogin', component: () => import('../views/AdminLoginView.vue'), meta: { title: 'Admin Login' } },
     {
       path: '/admin',
@@ -57,6 +58,10 @@ router.beforeEach((to, _from, next) => {
   const { isLoggedIn, isStaff } = useAuth()
   if (to.meta.guestOnly && isLoggedIn.value) {
     next({ name: 'Home' })
+    return
+  }
+  if (to.meta.requiresAuth && !isLoggedIn.value) {
+    next({ name: 'Login', query: { redirect: to.fullPath } })
     return
   }
   if (to.meta.requiresStaff) {

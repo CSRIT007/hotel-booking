@@ -366,3 +366,49 @@ export async function deleteExpense(id) {
   }
   throw new Error('No API configured')
 }
+
+export async function getMyBookings(userId) {
+  if (!userId) return []
+  if (hasLocalApi) {
+    try {
+      return await localApi.getMyBookings(userId)
+    } catch (e) {
+      console.warn('Local API getMyBookings failed:', e.message)
+      return []
+    }
+  }
+  if (hasTadabase) {
+    try {
+      const list = await tadabase.getBookings({ user_id: userId })
+      return Array.isArray(list) ? list.filter((b) => String(b.user_id) === String(userId)) : []
+    } catch (e) {
+      console.warn('Tadabase getMyBookings failed:', e.message)
+      return []
+    }
+  }
+  return []
+}
+
+export async function getNotifications(userId) {
+  if (!userId) return []
+  if (hasLocalApi) {
+    try {
+      return await localApi.getNotifications(userId)
+    } catch (e) {
+      console.warn('Local API getNotifications failed:', e.message)
+      return []
+    }
+  }
+  return []
+}
+
+export async function markNotificationsRead(userId) {
+  if (!userId) return
+  if (hasLocalApi) {
+    try {
+      return await localApi.markNotificationsRead(userId)
+    } catch (e) {
+      console.warn('Local API markNotificationsRead failed:', e.message)
+    }
+  }
+}

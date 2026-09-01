@@ -88,6 +88,21 @@ export async function createPosTransaction(payload) {
   return data
 }
 
+export async function getMyBookings(userId) {
+  const { data } = await client.get('/api/bookings', { params: { user_id: userId } })
+  return Array.isArray(data) ? data : []
+}
+
+export async function getNotifications(userId) {
+  const { data } = await client.get('/api/notifications', { params: { user_id: userId } })
+  return Array.isArray(data) ? data : []
+}
+
+export async function markNotificationsRead(userId) {
+  const { data } = await client.patch('/api/notifications/read', { user_id: userId })
+  return data
+}
+
 export async function getExpenses() {
   const { data } = await client.get('/api/expenses')
   return Array.isArray(data) ? data : []

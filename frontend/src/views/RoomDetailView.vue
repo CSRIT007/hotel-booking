@@ -66,6 +66,13 @@
               <p v-if="totalPrice" class="text-lg font-medium text-stone-800">Total: ${{ totalPrice.toFixed(2) }}</p>
               <p v-if="bookingError" class="text-sm text-red-600">{{ bookingError }}</p>
               <p v-if="bookingSuccess" class="text-sm text-green-600">{{ bookingSuccess }}</p>
+              <router-link
+                v-if="bookingSuccess"
+                to="/my-bookings"
+                class="mt-1 inline-block text-sm font-medium text-brand-600 hover:underline"
+              >
+                View my bookings
+              </router-link>
               <button
                 type="submit"
                 :disabled="bookingLoading"
@@ -156,7 +163,7 @@ async function submitBooking() {
       total_price: totalPrice.value,
       status: 'pending',
     })
-    bookingSuccess.value = 'Booking request sent. We will confirm shortly.'
+    bookingSuccess.value = 'Booking request sent. Check My bookings for status — we will update it when it is confirmed and ready.'
   } catch (e) {
     bookingError.value = e.message || 'Booking failed.'
   }

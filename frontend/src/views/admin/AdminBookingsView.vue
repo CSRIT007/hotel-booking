@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Bookings</h1>
-    <p class="mt-1 text-stone-600">All booking requests. Confirm or cancel from here.</p>
+    <p class="mt-1 text-stone-600">All booking requests. Confirm to notify the guest that their stay is ready.</p>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
       <div class="overflow-x-auto">

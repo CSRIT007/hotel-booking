@@ -47,10 +47,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthApi } from '../services/auth'
 
 const router = useRouter()
+const route = useRoute()
 const { login } = useAuthApi()
 const loginId = ref('')
 const password = ref('')
@@ -70,7 +71,7 @@ async function handleLogin() {
     if (res?.user?.role === 'staff') {
       router.push({ name: 'AdminDashboard' })
     } else {
-      router.push({ name: 'Home' })
+      router.push(route.query.redirect || { name: 'Home' })
     }
   } catch (e) {
     error.value = e.message || 'Login failed.'
