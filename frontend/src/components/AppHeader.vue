@@ -25,7 +25,15 @@
               {{ unreadCount }}
             </span>
           </router-link>
-          <router-link v-if="isStaff" to="/admin" class="nav-link">Dashboard</router-link>
+          <router-link v-if="isStaff" to="/admin" class="relative nav-link">
+            Dashboard
+            <span
+              v-if="staffAlertCount > 0"
+              class="absolute -right-2 -top-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white"
+            >
+              {{ staffAlertCount }}
+            </span>
+          </router-link>
           <button type="button" class="rounded-lg bg-stone-200 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-100 dark:hover:bg-stone-600" @click="requestLogout">
             Logout
           </button>
@@ -58,7 +66,10 @@
         <router-link to="/contact" class="mobile-link" @click="menuOpen = false">Contact</router-link>
         <template v-if="isLoggedIn">
           <router-link to="/my-bookings" class="mobile-link" @click="menuOpen = false">My bookings</router-link>
-          <router-link v-if="isStaff" to="/admin" class="mobile-link" @click="menuOpen = false">Dashboard</router-link>
+          <router-link v-if="isStaff" to="/admin" class="mobile-link flex items-center justify-between" @click="menuOpen = false">
+            Dashboard
+            <span v-if="staffAlertCount > 0" class="rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{{ staffAlertCount }}</span>
+          </router-link>
           <button type="button" class="mobile-link text-left" @click="menuOpen = false; requestLogout()">Logout</button>
         </template>
         <template v-else>
@@ -80,14 +91,17 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useRouter, useRoute } from 'vue-router'
 import ThemeToggle from './ThemeToggle.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import { getNotifications } from '../services/data'
+import { useStaffAlerts } from '../composables/useStaffAlerts'
 
 const { isLoggedIn, currentUser, isStaff, logout } = useAuth()
+const { newMessages, pendingBookings } = useStaffAlerts()
+const staffAlertCount = computed(() => newMessages.value + pendingBookings.value)
 const router = useRouter()
 const route = useRoute()
 const showLogoutConfirm = ref(false)

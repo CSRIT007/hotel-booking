@@ -24,7 +24,10 @@
           <div v-show="openGroup === 'pms'" class="admin-sub">
             <router-link to="/admin/properties" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/properties') }">Properties</router-link>
             <router-link to="/admin/rooms" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/rooms') }">Rooms</router-link>
-            <router-link to="/admin/bookings" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/bookings') }">Bookings</router-link>
+            <router-link to="/admin/bookings" class="admin-sub-link flex items-center justify-between" :class="{ 'admin-sub-active': isActive('/admin/bookings') }">
+              <span>Bookings</span>
+              <span v-if="pendingBookings > 0" class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-400 px-1.5 text-[10px] font-semibold text-stone-900">{{ pendingBookings }}</span>
+            </router-link>
             <router-link to="/admin/guests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/guests') }">Guests</router-link>
             <router-link to="/admin/housekeeping" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/housekeeping') }">Housekeeping</router-link>
           </div>
@@ -115,7 +118,12 @@
         </div>
 
         <router-link to="/admin/contacts" class="admin-nav" :class="{ 'admin-nav-active': isActive('/admin/contacts') }">
-          <span class="w-6 text-center">✉</span> Messages
+          <span class="w-6 text-center">✉</span>
+          <span class="flex-1">Messages</span>
+          <span
+            v-if="newMessages > 0"
+            class="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white"
+          >{{ newMessages }}</span>
         </router-link>
       </nav>
       <div class="border-t border-stone-700 p-3 space-y-1">
@@ -128,10 +136,37 @@
     <div class="flex flex-1 flex-col lg:ml-64">
       <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900">
         <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100 dark:hover:bg-stone-800" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
-        <h1 class="flex-1 text-lg font-semibold text-stone-800">Admin</h1>
-        <ThemeToggle />
+        <h1 class="text-lg font-semibold text-stone-800">Admin</h1>
+        <div class="ml-auto flex items-center gap-3">
+          <router-link
+            v-if="newMessages > 0"
+            to="/admin/contacts"
+            class="hidden rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 sm:inline-flex"
+          >
+            {{ newMessages }} new message{{ newMessages === 1 ? '' : 's' }}
+          </router-link>
+          <router-link
+            v-if="pendingBookings > 0"
+            to="/admin/bookings?status=pending"
+            class="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 sm:inline-flex"
+          >
+            {{ pendingBookings }} booking request{{ pendingBookings === 1 ? '' : 's' }}
+          </router-link>
+          <ThemeToggle />
+        </div>
       </header>
-      <main class="flex-1 p-4 md:p-6">
+      <main class="relative flex-1 p-4 md:p-6">
+        <div
+          v-if="toast"
+          class="fixed right-4 top-20 z-50 max-w-sm rounded-xl border border-red-200 bg-white px-4 py-3 text-sm shadow-lg"
+        >
+          <p class="font-semibold text-stone-800">{{ toast }}</p>
+          <p v-if="latestMessage" class="mt-1 text-stone-600">{{ latestMessage.subject || 'Open Messages to read it.' }}</p>
+          <div class="mt-2 flex gap-3">
+            <router-link to="/admin/contacts" class="font-medium text-red-700 hover:underline" @click="dismissToast">Open</router-link>
+            <button type="button" class="text-stone-500 hover:underline" @click="dismissToast">Dismiss</button>
+          </div>
+        </div>
         <router-view />
       </main>
     </div>
@@ -151,12 +186,14 @@
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import { useStaffAlerts } from '../composables/useStaffAlerts'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { logout: doLogout, currentUser } = useAuth()
+const { newMessages, pendingBookings, latestMessage, toast, refresh, dismissToast } = useStaffAlerts()
 const sidebarOpen = ref(true)
 const openGroup = ref('pms')
 const showLogoutConfirm = ref(false)
@@ -177,7 +214,13 @@ function confirmLogout() {
   router.push({ name: 'AdminLogin' })
 }
 
+watch([newMessages, () => route.meta.title], () => {
+  const base = route.meta.title ? `${route.meta.title} — Smile Hotel` : 'Smile Hotel'
+  document.title = newMessages.value > 0 ? `(${newMessages.value}) ${base}` : base
+})
+
 watch(() => route.path, (path) => {
+  refresh()
   if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/properties') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
   else if (path.startsWith('/admin/pos')) openGroup.value = 'pos'
   else if (path.startsWith('/admin/crs')) openGroup.value = 'crs'
@@ -200,7 +243,7 @@ watch(() => route.path, (path) => {
   @apply border-l-2 border-stone-600 ml-4 pl-2 space-y-0.5;
 }
 .admin-sub-link {
-  @apply block py-1.5 px-2 rounded text-stone-400 hover:text-white hover:bg-stone-700 text-sm;
+  @apply flex items-center justify-between py-1.5 px-2 rounded text-stone-400 hover:text-white hover:bg-stone-700 text-sm;
 }
 .admin-sub-active {
   @apply text-blue-300 bg-stone-700;

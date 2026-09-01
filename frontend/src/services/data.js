@@ -280,6 +280,18 @@ export async function getContacts() {
   return []
 }
 
+export async function getStaffAlerts() {
+  if (hasLocalApi) {
+    try {
+      return await localApi.getStaffAlerts()
+    } catch (e) {
+      console.warn('Local API getStaffAlerts failed:', e.message)
+      return { new_messages: 0, pending_bookings: 0, latest_message: null }
+    }
+  }
+  return { new_messages: 0, pending_bookings: 0, latest_message: null }
+}
+
 export async function getUsers(params = {}) {
   if (hasLocalApi) {
     try {

@@ -463,6 +463,29 @@ app.get('/api/contacts', async (_req, res) => {
   }
 })
 
+app.get('/api/staff-alerts', async (_req, res) => {
+  try {
+    const [messages, bookings, latest] = await Promise.all([
+      pool.query("SELECT COUNT(*) AS count FROM contacts WHERE status = 'new'"),
+      pool.query("SELECT COUNT(*) AS count FROM bookings WHERE status = 'pending'"),
+      pool.query(
+        `SELECT id, name, email, subject, created_at
+         FROM contacts
+         WHERE status = 'new'
+         ORDER BY created_at DESC
+         LIMIT 1`
+      ),
+    ])
+    res.json({
+      new_messages: parseInt(messages.rows[0].count, 10),
+      pending_bookings: parseInt(bookings.rows[0].count, 10),
+      latest_message: latest.rows[0] || null,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.patch('/api/contacts/:id', async (req, res) => {
   try {
     const { status } = req.body || {}

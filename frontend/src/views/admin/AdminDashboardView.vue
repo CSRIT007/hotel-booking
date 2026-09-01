@@ -19,10 +19,13 @@
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ roomCounts.available }} / {{ roomCounts.total }}</p>
         <router-link to="/admin/rooms" class="mt-2 text-sm text-stone-600 hover:underline">Add / remove rooms</router-link>
       </div>
-      <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">All bookings</p>
-        <p class="mt-1 text-2xl font-bold text-stone-800">{{ totalBookings }}</p>
-        <router-link to="/admin/bookings" class="mt-2 text-sm text-stone-600 hover:underline">View all</router-link>
+      <div
+        class="rounded-xl border bg-white p-4 shadow-sm"
+        :class="newMessages > 0 ? 'border-red-200' : 'border-stone-200'"
+      >
+        <p class="text-xs font-medium uppercase text-stone-500">New messages</p>
+        <p class="mt-1 text-2xl font-bold" :class="newMessages > 0 ? 'text-red-600' : 'text-stone-800'">{{ newMessages }}</p>
+        <router-link to="/admin/contacts" class="mt-2 text-sm hover:underline" :class="newMessages > 0 ? 'text-red-600' : 'text-stone-600'">Open inbox</router-link>
       </div>
     </div>
 
@@ -108,7 +111,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getBookings, getRooms } from '../../services/data'
+import { useStaffAlerts } from '../../composables/useStaffAlerts'
 
+const { newMessages } = useStaffAlerts()
 const bookings = ref([])
 const rooms = ref([])
 const loading = ref(true)

@@ -119,6 +119,11 @@ export async function getContacts() {
   return Array.isArray(data) ? data : []
 }
 
+export async function getStaffAlerts() {
+  const { data } = await client.get('/api/staff-alerts')
+  return data || { new_messages: 0, pending_bookings: 0, latest_message: null }
+}
+
 export async function updateContactStatus(id, status) {
   const { data } = await client.patch(`/api/contacts/${id}`, { status })
   return data
