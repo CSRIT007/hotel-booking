@@ -20,6 +20,7 @@ const router = createRouter({
       meta: { requiresStaff: true, title: 'Admin' },
       children: [
         { path: '', name: 'AdminDashboard', component: () => import('../views/admin/AdminDashboardView.vue'), meta: { title: 'Dashboard' } },
+        { path: 'properties', name: 'AdminProperties', component: () => import('../views/admin/AdminPropertiesView.vue'), meta: { title: 'Properties' } },
         { path: 'rooms', name: 'AdminRooms', component: () => import('../views/admin/AdminRoomsView.vue'), meta: { title: 'Rooms' } },
         { path: 'bookings', name: 'AdminBookings', component: () => import('../views/admin/AdminBookingsView.vue'), meta: { title: 'Bookings' } },
         { path: 'guests', name: 'AdminGuests', component: () => import('../views/admin/AdminGuestsView.vue'), meta: { title: 'Guests' } },

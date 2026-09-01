@@ -3,17 +3,22 @@
     <p class="text-stone-500">Loading room…</p>
   </div>
   <div v-else-if="room">
-    <section class="bg-stone-800 py-12">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <p class="text-brand-300 text-sm">
-          <router-link to="/" class="hover:text-brand-200">Home</router-link>
-          <span class="mx-2">/</span>
-          <router-link to="/rooms" class="hover:text-brand-200">Rooms</router-link>
-          <span class="mx-2">/</span>
+    <section class="relative overflow-hidden bg-stone-900 py-16">
+      <div
+        class="absolute inset-0 bg-cover bg-center"
+        :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
+      />
+      <div class="absolute inset-0 bg-gradient-to-r from-stone-950/85 via-stone-900/65 to-stone-900/25" />
+      <div class="relative mx-auto max-w-6xl px-4 sm:px-6">
+        <p class="text-sm text-brand-200">
+          <router-link to="/" class="hover:text-white">Home</router-link>
+          <span class="mx-2 text-white/40">/</span>
+          <router-link to="/rooms" class="hover:text-white">Rooms</router-link>
+          <span class="mx-2 text-white/40">/</span>
           {{ room.name }}
         </p>
-        <h1 class="mt-2 font-display text-3xl font-bold text-white">{{ room.name }}</h1>
-        <p class="mt-1 text-stone-300">{{ room.hotel_name }}</p>
+        <h1 class="mt-2 font-display text-3xl font-bold text-white sm:text-4xl">{{ room.name }}</h1>
+        <p class="mt-1 text-stone-200">{{ room.hotel_name }}</p>
       </div>
     </section>
 

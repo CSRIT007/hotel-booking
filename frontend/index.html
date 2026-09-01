@@ -10,7 +10,7 @@
       (function () {
         try {
           var stored = localStorage.getItem('hotel_theme')
-          var dark = stored === 'dark' || (stored !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var dark = stored === 'dark'
           if (dark) document.documentElement.classList.add('dark')
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
         } catch (e) {}

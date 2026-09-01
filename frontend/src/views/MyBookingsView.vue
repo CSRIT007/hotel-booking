@@ -1,16 +1,12 @@
 <template>
   <div>
-    <section class="bg-stone-800 py-12">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <p class="text-brand-300 text-sm">
-          <router-link to="/" class="hover:text-brand-200">Home</router-link>
-          <span class="mx-2">/</span>
-          My bookings
-        </p>
-        <h1 class="mt-2 font-display text-3xl font-bold text-white">My bookings</h1>
-        <p class="mt-1 text-stone-300">See whether your request is waiting, confirmed and ready, or cancelled.</p>
-      </div>
-    </section>
+    <PageHero title="My bookings" subtitle="See whether your request is waiting, confirmed and ready, or cancelled." image="/images/image_5.jpg">
+      <template #crumbs>
+        <router-link to="/" class="hover:text-white">Home</router-link>
+        <span class="mx-2 text-white/40">/</span>
+        My bookings
+      </template>
+    </PageHero>
 
     <section class="py-12">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
@@ -74,6 +70,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyBookings, getNotifications, markNotificationsRead } from '../services/data'
+import PageHero from '../components/PageHero.vue'
 
 const { currentUser } = useAuth()
 const bookings = ref([])

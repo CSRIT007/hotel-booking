@@ -10,9 +10,40 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+function throwApiError(e, fallback) {
+  throw new Error(e.response?.data?.error || e.message || fallback)
+}
+
 export async function getHotels() {
   const { data } = await client.get('/api/hotels')
   return Array.isArray(data) ? data : []
+}
+
+export async function createHotel(payload) {
+  try {
+    const { data } = await client.post('/api/hotels', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add property')
+  }
+}
+
+export async function updateHotel(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hotels/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update property')
+  }
+}
+
+export async function deleteHotel(id) {
+  try {
+    const { data } = await client.delete(`/api/hotels/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove property')
+  }
 }
 
 export async function getRooms(params = {}) {
@@ -23,6 +54,33 @@ export async function getRooms(params = {}) {
 export async function getRoom(id) {
   const { data } = await client.get(`/api/rooms/${id}`)
   return data
+}
+
+export async function createRoom(payload) {
+  try {
+    const { data } = await client.post('/api/rooms', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add room')
+  }
+}
+
+export async function updateRoom(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/rooms/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update room')
+  }
+}
+
+export async function deleteRoom(id) {
+  try {
+    const { data } = await client.delete(`/api/rooms/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove room')
+  }
 }
 
 export async function createBooking(payload) {

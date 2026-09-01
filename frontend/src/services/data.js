@@ -66,6 +66,21 @@ export async function getHotels() {
   return mockHotels
 }
 
+export async function createHotel(payload) {
+  if (hasLocalApi) return await localApi.createHotel(payload)
+  throw new Error('No API configured')
+}
+
+export async function updateHotel(id, payload) {
+  if (hasLocalApi) return await localApi.updateHotel(id, payload)
+  throw new Error('No API configured')
+}
+
+export async function deleteHotel(id) {
+  if (hasLocalApi) return await localApi.deleteHotel(id)
+  throw new Error('No API configured')
+}
+
 export async function getRooms(params = {}) {
   if (hasLocalApi) {
     try {
@@ -110,6 +125,21 @@ export async function getRoom(id) {
   const room = mockRooms.find((r) => String(r.id) === String(id))
   if (room) return { ...room, hotel_name: mockHotels.find((h) => h.id === room.hotel_id)?.name }
   return null
+}
+
+export async function createRoom(payload) {
+  if (hasLocalApi) return await localApi.createRoom(payload)
+  throw new Error('No API configured')
+}
+
+export async function updateRoom(id, payload) {
+  if (hasLocalApi) return await localApi.updateRoom(id, payload)
+  throw new Error('No API configured')
+}
+
+export async function deleteRoom(id) {
+  if (hasLocalApi) return await localApi.deleteRoom(id)
+  throw new Error('No API configured')
 }
 
 export async function createBooking(payload) {

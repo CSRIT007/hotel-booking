@@ -1,21 +1,22 @@
 <template>
   <header class="sticky top-0 z-50 border-b border-stone-200/80 bg-warm-50/95 backdrop-blur-sm dark:border-stone-700 dark:bg-stone-950/95">
-    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+    <div class="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
       <router-link to="/" class="font-display text-xl font-semibold text-brand-700 dark:text-brand-300">
         Smile Hotel
       </router-link>
-      <nav class="flex flex-wrap items-center justify-end gap-3 sm:gap-6">
-        <router-link to="/" class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300">Home</router-link>
-        <router-link to="/rooms" class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300">Rooms</router-link>
-        <router-link to="/services" class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300">Services</router-link>
-        <router-link to="/about" class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300">About</router-link>
-        <router-link to="/contact" class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300">Contact</router-link>
+
+      <nav class="hidden flex-1 items-center justify-center gap-6 text-sm font-medium lg:flex">
+        <router-link to="/" class="nav-link">Home</router-link>
+        <router-link to="/rooms" class="nav-link">Rooms</router-link>
+        <router-link to="/services" class="nav-link">Services</router-link>
+        <router-link to="/about" class="nav-link">About</router-link>
+        <router-link to="/contact" class="nav-link">Contact</router-link>
+      </nav>
+
+      <div class="ml-auto hidden items-center gap-3 lg:flex">
         <template v-if="isLoggedIn">
-          <span class="text-sm text-stone-500">Hi, {{ currentUser?.username }}</span>
-          <router-link
-            to="/my-bookings"
-            class="relative text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300"
-          >
+          <span class="hidden text-sm text-stone-500 xl:inline">Hi, {{ currentUser?.username }}</span>
+          <router-link to="/my-bookings" class="relative nav-link">
             My bookings
             <span
               v-if="unreadCount > 0"
@@ -24,36 +25,46 @@
               {{ unreadCount }}
             </span>
           </router-link>
-          <router-link
-            v-if="isStaff"
-            to="/admin"
-            class="text-stone-600 hover:text-brand-600 transition dark:text-stone-300 dark:hover:text-brand-300"
-          >
-            Dashboard
-          </router-link>
-          <button
-            type="button"
-            class="rounded-lg bg-stone-200 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-100 dark:hover:bg-stone-600"
-            @click="requestLogout"
-          >
+          <router-link v-if="isStaff" to="/admin" class="nav-link">Dashboard</router-link>
+          <button type="button" class="rounded-lg bg-stone-200 px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-100 dark:hover:bg-stone-600" @click="requestLogout">
             Logout
           </button>
         </template>
         <template v-else>
-          <router-link
-            to="/login"
-            class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
-          >
-            Login
-          </router-link>
-          <router-link
-            to="/register"
-            class="rounded-lg border border-brand-600 px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-900/40"
-          >
-            Register
+          <router-link to="/login" class="text-sm font-medium text-stone-600 hover:text-brand-600 dark:text-stone-300">Login</router-link>
+          <router-link to="/register" class="rounded-lg bg-brand-600 px-3.5 py-1.5 text-sm font-medium text-white hover:bg-brand-700">
+            Book a stay
           </router-link>
         </template>
         <ThemeToggle />
+      </div>
+
+      <div class="ml-auto flex items-center gap-2 lg:hidden">
+        <ThemeToggle />
+        <button type="button" class="rounded-lg border border-stone-200 p-2 text-stone-700 dark:border-stone-600 dark:text-stone-200" aria-label="Open menu" @click="menuOpen = !menuOpen">
+          <span class="block h-0.5 w-5 bg-current" />
+          <span class="mt-1 block h-0.5 w-5 bg-current" />
+          <span class="mt-1 block h-0.5 w-5 bg-current" />
+        </button>
+      </div>
+    </div>
+
+    <div v-if="menuOpen" class="border-t border-stone-200 bg-warm-50 px-4 py-3 lg:hidden dark:border-stone-700 dark:bg-stone-950">
+      <nav class="flex flex-col gap-2 text-sm font-medium">
+        <router-link to="/" class="mobile-link" @click="menuOpen = false">Home</router-link>
+        <router-link to="/rooms" class="mobile-link" @click="menuOpen = false">Rooms</router-link>
+        <router-link to="/services" class="mobile-link" @click="menuOpen = false">Services</router-link>
+        <router-link to="/about" class="mobile-link" @click="menuOpen = false">About</router-link>
+        <router-link to="/contact" class="mobile-link" @click="menuOpen = false">Contact</router-link>
+        <template v-if="isLoggedIn">
+          <router-link to="/my-bookings" class="mobile-link" @click="menuOpen = false">My bookings</router-link>
+          <router-link v-if="isStaff" to="/admin" class="mobile-link" @click="menuOpen = false">Dashboard</router-link>
+          <button type="button" class="mobile-link text-left" @click="menuOpen = false; requestLogout()">Logout</button>
+        </template>
+        <template v-else>
+          <router-link to="/login" class="mobile-link" @click="menuOpen = false">Login</router-link>
+          <router-link to="/register" class="mobile-link text-brand-700" @click="menuOpen = false">Register</router-link>
+        </template>
       </nav>
     </div>
   </header>
@@ -81,6 +92,7 @@ const router = useRouter()
 const route = useRoute()
 const showLogoutConfirm = ref(false)
 const unreadCount = ref(0)
+const menuOpen = ref(false)
 let unreadTimer = null
 
 async function loadUnread() {
@@ -97,7 +109,10 @@ async function loadUnread() {
 }
 
 watch(isLoggedIn, loadUnread)
-watch(() => route.fullPath, loadUnread)
+watch(() => route.fullPath, () => {
+  menuOpen.value = false
+  loadUnread()
+})
 onMounted(() => {
   loadUnread()
   unreadTimer = setInterval(loadUnread, 15000)
@@ -116,3 +131,15 @@ function confirmLogout() {
   router.push({ name: 'Home' })
 }
 </script>
+
+<style scoped>
+.nav-link {
+  @apply text-stone-600 transition hover:text-brand-600 dark:text-stone-300 dark:hover:text-brand-300;
+}
+.nav-link.router-link-exact-active {
+  @apply text-brand-700 dark:text-brand-300;
+}
+.mobile-link {
+  @apply rounded-lg px-2 py-2 text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800;
+}
+</style>

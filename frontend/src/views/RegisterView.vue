@@ -1,7 +1,8 @@
 <template>
-  <div class="min-h-[60vh] py-16">
-    <div class="mx-auto max-w-md px-4">
-      <h1 class="font-display text-2xl font-semibold text-stone-800">Register</h1>
+  <div class="flex min-h-[70vh] items-center py-16">
+    <div class="mx-auto w-full max-w-md px-4">
+      <div class="rounded-3xl border border-stone-200 bg-white p-8 shadow-sm">
+      <h1 class="font-display text-2xl font-semibold text-stone-800">Create an account</h1>
       <form class="mt-8 space-y-4" @submit.prevent="handleRegister">
         <div>
           <label class="block text-sm font-medium text-stone-700">Username</label>
@@ -59,6 +60,7 @@
         Already have an account?
         <router-link to="/login" class="text-brand-600 hover:underline">Login</router-link>
       </p>
+      </div>
     </div>
   </div>
 </template>

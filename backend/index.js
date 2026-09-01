@@ -163,6 +163,139 @@ app.get('/api/rooms/:id', async (req, res) => {
   }
 })
 
+app.post('/api/hotels', async (req, res) => {
+  try {
+    const { name, description, location, image } = req.body || {}
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Property name is required.' })
+    if (!location || !String(location).trim()) return res.status(400).json({ error: 'Location is required.' })
+    const r = await pool.query(
+      `INSERT INTO hotels (name, description, location, image)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [String(name).trim(), description || '', String(location).trim(), image || null]
+    )
+    const row = r.rows[0]
+    res.status(201).json({ ...row, image: ensureImagePath(row.image) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hotels/:id', async (req, res) => {
+  try {
+    const { name, description, location, image } = req.body || {}
+    const current = await pool.query('SELECT * FROM hotels WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Property not found' })
+    const row = current.rows[0]
+    const nextName = name != null ? String(name).trim() : row.name
+    const nextLocation = location != null ? String(location).trim() : row.location
+    if (!nextName) return res.status(400).json({ error: 'Property name is required.' })
+    if (!nextLocation) return res.status(400).json({ error: 'Location is required.' })
+    const r = await pool.query(
+      `UPDATE hotels SET name = $1, description = $2, location = $3, image = $4 WHERE id = $5 RETURNING *`,
+      [nextName, description != null ? description : row.description, nextLocation, image != null ? image : row.image, req.params.id]
+    )
+    res.json({ ...r.rows[0], image: ensureImagePath(r.rows[0].image) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hotels/:id', async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM hotels WHERE id = $1 RETURNING id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Property not found' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/rooms', async (req, res) => {
+  try {
+    const { hotel_id, name, description, price, max_persons, size, view_type, beds, image, status } = req.body || {}
+    if (!hotel_id) return res.status(400).json({ error: 'Select a property first.' })
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Room name is required.' })
+    if (price == null || Number(price) < 0) return res.status(400).json({ error: 'Price is required.' })
+    const hotel = await pool.query('SELECT id FROM hotels WHERE id = $1', [hotel_id])
+    if (!hotel.rows[0]) return res.status(400).json({ error: 'Property not found. Add a property first.' })
+    const roomStatus = ['available', 'booked', 'maintenance'].includes(status) ? status : 'available'
+    const r = await pool.query(
+      `INSERT INTO rooms (hotel_id, name, description, price, max_persons, size, view_type, beds, image, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [
+        hotel_id,
+        String(name).trim(),
+        description || '',
+        Number(price),
+        parseInt(max_persons, 10) || 2,
+        size || '',
+        view_type || '',
+        parseInt(beds, 10) || 1,
+        image || null,
+        roomStatus,
+      ]
+    )
+    const details = await pool.query(
+      'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
+      [r.rows[0].id]
+    )
+    res.status(201).json({ ...details.rows[0], image: ensureImagePath(details.rows[0].image) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/rooms/:id', async (req, res) => {
+  try {
+    const current = await pool.query('SELECT * FROM rooms WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Room not found' })
+    const row = current.rows[0]
+    const body = req.body || {}
+    const hotelId = body.hotel_id != null ? body.hotel_id : row.hotel_id
+    const hotel = await pool.query('SELECT id FROM hotels WHERE id = $1', [hotelId])
+    if (!hotel.rows[0]) return res.status(400).json({ error: 'Property not found.' })
+    const nextName = body.name != null ? String(body.name).trim() : row.name
+    if (!nextName) return res.status(400).json({ error: 'Room name is required.' })
+    const nextStatus = body.status && ['available', 'booked', 'maintenance'].includes(body.status) ? body.status : row.status
+    const r = await pool.query(
+      `UPDATE rooms
+       SET hotel_id = $1, name = $2, description = $3, price = $4, max_persons = $5,
+           size = $6, view_type = $7, beds = $8, image = $9, status = $10
+       WHERE id = $11 RETURNING *`,
+      [
+        hotelId,
+        nextName,
+        body.description != null ? body.description : row.description,
+        body.price != null ? Number(body.price) : row.price,
+        body.max_persons != null ? parseInt(body.max_persons, 10) : row.max_persons,
+        body.size != null ? body.size : row.size,
+        body.view_type != null ? body.view_type : row.view_type,
+        body.beds != null ? parseInt(body.beds, 10) : row.beds,
+        body.image != null ? body.image : row.image,
+        nextStatus,
+        req.params.id,
+      ]
+    )
+    const details = await pool.query(
+      'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
+      [r.rows[0].id]
+    )
+    res.json({ ...details.rows[0], image: ensureImagePath(details.rows[0].image) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/rooms/:id', async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM rooms WHERE id = $1 RETURNING id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Room not found' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Debug: verify which DB the API uses (same as admin bookings)
 app.get('/api/db-info', async (_req, res) => {
   try {

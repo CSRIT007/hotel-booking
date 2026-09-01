@@ -1,52 +1,43 @@
 <template>
   <div>
-    <section class="bg-stone-800 py-16">
-      <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <p class="text-brand-300 text-sm font-medium uppercase tracking-wider">
-          <router-link to="/" class="hover:text-brand-200">Home</router-link>
-          <span class="mx-2">/</span>
-          Rooms
-        </p>
-        <h1 class="mt-2 font-display text-3xl font-bold text-white sm:text-4xl">Apartment rooms</h1>
-      </div>
-    </section>
+    <PageHero title="Rooms" subtitle="Choose a room that fits your trip. Request a stay and the hotel will confirm." image="/images/room-4.jpg">
+      <template #crumbs>
+        <router-link to="/" class="hover:text-white">Home</router-link>
+        <span class="mx-2 text-white/40">/</span>
+        Rooms
+      </template>
+    </PageHero>
 
-    <section class="py-12 sm:py-16">
+    <section class="py-14 sm:py-20">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <div class="grid gap-8 lg:grid-cols-2">
-          <div
-            v-for="(room, i) in rooms"
+        <div class="grid gap-8 md:grid-cols-2">
+          <article
+            v-for="room in rooms"
             :key="room.id"
-            class="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm sm:flex-row"
-            :class="{ 'sm:flex-row-reverse': i % 2 === 1 }"
+            class="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm transition hover:shadow-md"
           >
             <router-link
               :to="{ name: 'RoomDetail', params: { id: room.id } }"
-              class="h-56 flex-shrink-0 bg-stone-200 bg-cover bg-center sm:w-1/2"
+              class="block h-56 bg-stone-200 bg-cover bg-center"
               :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
             />
-            <div class="flex flex-1 flex-col justify-center p-6">
-              <p class="text-sm text-amber-600">${{ Number(room.price).toFixed(2) }} per night</p>
-              <h2 class="mt-1 font-display text-xl font-semibold text-stone-800">
-                <router-link :to="{ name: 'RoomDetail', params: { id: room.id } }" class="hover:text-brand-600">
+            <div class="p-6">
+              <p class="text-sm font-medium text-brand-700">${{ Number(room.price).toFixed(0) }} <span class="font-normal text-stone-500">per night</span></p>
+              <h2 class="mt-1 font-display text-2xl font-semibold text-stone-800">
+                <router-link :to="{ name: 'RoomDetail', params: { id: room.id } }" class="hover:text-brand-700">
                   {{ room.name }}
                 </router-link>
               </h2>
-              <ul class="mt-2 space-y-1 text-sm text-stone-600">
-                <li><span class="font-medium">Max:</span> {{ room.max_persons }} persons</li>
-                <li><span class="font-medium">Size:</span> {{ room.size }}</li>
-                <li><span class="font-medium">View:</span> {{ room.view_type }}</li>
-                <li><span class="font-medium">Bed:</span> {{ room.beds }}</li>
-              </ul>
+              <p class="mt-1 text-sm text-stone-500">{{ room.hotel_name }}</p>
+              <p class="mt-3 text-sm text-stone-600">{{ room.max_persons }} guests · {{ room.size }} · {{ room.view_type }} · {{ room.beds }} bed(s)</p>
               <router-link
                 :to="{ name: 'RoomDetail', params: { id: room.id } }"
-                class="mt-4 inline-flex items-center text-brand-600 font-medium hover:text-brand-700"
+                class="mt-5 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-800"
               >
-                View room details
-                <span class="ml-1">→</span>
+                View room details →
               </router-link>
             </div>
-          </div>
+          </article>
         </div>
         <p v-if="rooms.length === 0 && !loading" class="text-center text-stone-500">No rooms found.</p>
         <p v-if="loading" class="text-center text-stone-500">Loading rooms…</p>
@@ -59,6 +50,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getRooms } from '../services/data'
+import PageHero from '../components/PageHero.vue'
 
 const route = useRoute()
 const rooms = ref([])

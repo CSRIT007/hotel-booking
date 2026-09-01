@@ -17,7 +17,7 @@
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-medium uppercase text-stone-500">Rooms</p>
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ roomCounts.available }} / {{ roomCounts.total }}</p>
-        <router-link to="/admin/rooms" class="mt-2 text-sm text-stone-600 hover:underline">Manage</router-link>
+        <router-link to="/admin/rooms" class="mt-2 text-sm text-stone-600 hover:underline">Add / remove rooms</router-link>
       </div>
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-medium uppercase text-stone-500">All bookings</p>
@@ -93,6 +93,7 @@
       <h2 class="font-semibold text-stone-800">Quick links</h2>
       <ul class="mt-3 flex flex-wrap gap-4 text-sm">
         <li><router-link to="/admin/bookings" class="text-brand-600 hover:underline">Bookings</router-link></li>
+        <li><router-link to="/admin/properties" class="text-brand-600 hover:underline">Properties</router-link></li>
         <li><router-link to="/admin/rooms" class="text-brand-600 hover:underline">Rooms</router-link></li>
         <li><router-link to="/admin/guests" class="text-brand-600 hover:underline">Guests</router-link></li>
         <li><router-link to="/admin/contacts" class="text-brand-600 hover:underline">Messages</router-link></li>

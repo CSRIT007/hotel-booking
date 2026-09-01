@@ -22,6 +22,7 @@
             <span>{{ openGroup === 'pms' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'pms'" class="admin-sub">
+            <router-link to="/admin/properties" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/properties') }">Properties</router-link>
             <router-link to="/admin/rooms" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/rooms') }">Rooms</router-link>
             <router-link to="/admin/bookings" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/bookings') }">Bookings</router-link>
             <router-link to="/admin/guests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/guests') }">Guests</router-link>
@@ -177,7 +178,7 @@ function confirmLogout() {
 }
 
 watch(() => route.path, (path) => {
-  if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
+  if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/properties') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
   else if (path.startsWith('/admin/pos')) openGroup.value = 'pos'
   else if (path.startsWith('/admin/crs')) openGroup.value = 'crs'
   else if (path.startsWith('/admin/crm')) openGroup.value = 'crm'

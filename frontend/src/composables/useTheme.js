@@ -3,13 +3,7 @@ import { ref, computed } from 'vue'
 export const THEME_STORAGE_KEY = 'hotel_theme'
 
 const theme = ref('light')
-let mediaQuery
 let initialized = false
-
-function getSystemTheme() {
-  if (typeof window === 'undefined' || !window.matchMedia) return 'light'
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-}
 
 function readStoredTheme() {
   try {
@@ -27,23 +21,11 @@ function applyTheme(value) {
   document.documentElement.style.colorScheme = value
 }
 
-function onSystemChange(event) {
-  if (readStoredTheme()) return
-  theme.value = event.matches ? 'dark' : 'light'
-  applyTheme(theme.value)
-}
-
 export function initTheme() {
   if (initialized || typeof window === 'undefined') return
   initialized = true
-  theme.value = readStoredTheme() || getSystemTheme()
+  theme.value = readStoredTheme() || 'light'
   applyTheme(theme.value)
-  mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-  if (mediaQuery.addEventListener) {
-    mediaQuery.addEventListener('change', onSystemChange)
-  } else if (mediaQuery.addListener) {
-    mediaQuery.addListener(onSystemChange)
-  }
 }
 
 initTheme()
