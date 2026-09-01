@@ -16,7 +16,7 @@
           <button
             type="button"
             class="rounded-lg bg-stone-700 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
-            @click="handleLogout"
+            @click="requestLogout"
           >
             Logout
           </button>
@@ -38,16 +38,33 @@
       </div>
     </div>
   </div>
+  <ConfirmModal
+    :open="showLogoutConfirm"
+    title="Log out?"
+    message="Are you sure you want to log out?"
+    confirm-text="Log out"
+    cancel-text="Cancel"
+    @confirm="confirmLogout"
+    @cancel="showLogoutConfirm = false"
+  />
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import ConfirmModal from '../components/ConfirmModal.vue'
 
 const router = useRouter()
 const { currentUser, logout } = useAuth()
+const showLogoutConfirm = ref(false)
 
-function handleLogout() {
+function requestLogout() {
+  showLogoutConfirm.value = true
+}
+
+function confirmLogout() {
+  showLogoutConfirm.value = false
   logout()
   router.push({ name: 'AdminLogin' })
 }

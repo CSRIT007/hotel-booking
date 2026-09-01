@@ -1,8 +1,8 @@
 <template>
-  <div class="flex min-h-screen bg-stone-100">
+  <div class="flex min-h-screen bg-stone-100 dark:bg-stone-950">
     <!-- Sidebar -->
     <aside
-      class="fixed inset-y-0 left-0 z-40 w-64 flex flex-col border-r border-stone-200 bg-stone-800 text-white transition-transform lg:translate-x-0"
+      class="fixed inset-y-0 left-0 z-40 w-64 flex flex-col border-r border-stone-200 bg-stone-800 text-white transition-transform lg:translate-x-0 dark:border-stone-800 dark:bg-stone-950"
       :class="{ '-translate-x-full': !sidebarOpen }"
     >
       <div class="flex h-14 items-center justify-between border-b border-stone-700 px-4">
@@ -118,33 +118,47 @@
         </router-link>
       </nav>
       <div class="border-t border-stone-700 p-3 space-y-1">
+        <p class="px-4 py-1 text-xs text-stone-400">Signed in as {{ currentUser?.username }}</p>
         <a href="/" target="_blank" class="admin-nav block">↗ View site</a>
-        <button type="button" class="admin-nav w-full text-left" @click="logout">Logout ({{ currentUser?.username }})</button>
+        <button type="button" class="admin-nav w-full text-left" @click="requestLogout">Logout</button>
       </div>
     </aside>
 
     <div class="flex flex-1 flex-col lg:ml-64">
-      <header class="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-stone-200 bg-white px-4">
-        <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
-        <h1 class="text-lg font-semibold text-stone-800">Admin</h1>
+      <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900">
+        <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100 dark:hover:bg-stone-800" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
+        <h1 class="flex-1 text-lg font-semibold text-stone-800">Admin</h1>
+        <ThemeToggle />
       </header>
       <main class="flex-1 p-4 md:p-6">
         <router-view />
       </main>
     </div>
   </div>
+  <ConfirmModal
+    :open="showLogoutConfirm"
+    title="Log out?"
+    message="Are you sure you want to log out?"
+    confirm-text="Log out"
+    cancel-text="Cancel"
+    @confirm="confirmLogout"
+    @cancel="showLogoutConfirm = false"
+  />
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
+import ThemeToggle from '../components/ThemeToggle.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { currentUser, logout: doLogout } = useAuth()
+const { logout: doLogout, currentUser } = useAuth()
 const sidebarOpen = ref(true)
 const openGroup = ref('pms')
+const showLogoutConfirm = ref(false)
 
 function isActive(path, exactOnly) {
   if (exactOnly) return route.path.startsWith(path) && route.path !== path
@@ -153,7 +167,11 @@ function isActive(path, exactOnly) {
 function toggle(group) {
   openGroup.value = openGroup.value === group ? '' : group
 }
-function logout() {
+function requestLogout() {
+  showLogoutConfirm.value = true
+}
+function confirmLogout() {
+  showLogoutConfirm.value = false
   doLogout()
   router.push({ name: 'AdminLogin' })
 }

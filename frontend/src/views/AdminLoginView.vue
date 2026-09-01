@@ -1,7 +1,7 @@
 <template>
-  <div class="min-h-[70vh] flex items-center justify-center bg-stone-100 py-16">
+  <div class="min-h-[70vh] flex items-center justify-center bg-stone-100 py-16 dark:bg-stone-950">
     <div class="mx-auto w-full max-w-md px-4">
-      <div class="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+      <div class="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm dark:border-stone-700 dark:bg-stone-900">
         <h1 class="font-display text-2xl font-semibold text-stone-800">Admin login</h1>
         <p class="mt-1 text-sm text-stone-500">Staff only. Use your username and password.</p>
         <form class="mt-8 space-y-4" @submit.prevent="handleLogin">
