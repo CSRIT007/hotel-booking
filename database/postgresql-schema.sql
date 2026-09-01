@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role VARCHAR(20) DEFAULT 'guest' CHECK (role IN ('guest', 'staff')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    failed_login_count INT DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -143,6 +147,23 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
 CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+
+-- Audit log (staff and guest actions)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    actor_id INT REFERENCES users(id) ON DELETE SET NULL,
+    actor_name VARCHAR(100),
+    actor_role VARCHAR(20),
+    action VARCHAR(50) NOT NULL,
+    entity VARCHAR(50) NOT NULL,
+    entity_id INT,
+    summary TEXT NOT NULL,
+    details JSONB,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity);
 
 -- ============================================================================
 -- Sample data (only inserted when tables are empty)

@@ -3,6 +3,33 @@
     <h1 class="text-2xl font-semibold text-stone-800">Dashboard</h1>
     <p class="mt-1 text-stone-600">Summary of bookings, revenue and rooms.</p>
 
+    <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <router-link to="/admin/properties" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Properties
+        <span class="mt-1 block text-xs font-normal text-stone-500">Add or remove hotels</span>
+      </router-link>
+      <router-link to="/admin/rooms" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Rooms
+        <span class="mt-1 block text-xs font-normal text-stone-500">Add or remove rooms</span>
+      </router-link>
+      <router-link to="/admin/contacts" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Messages
+        <span class="mt-1 block text-xs font-normal text-stone-500">Guest contact inbox</span>
+      </router-link>
+      <router-link to="/admin/users" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Users
+        <span class="mt-1 block text-xs font-normal text-stone-500">Staff and guest accounts</span>
+      </router-link>
+      <router-link to="/admin/audit-log" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Audit log
+        <span class="mt-1 block text-xs font-normal text-stone-500">Who changed what</span>
+      </router-link>
+      <router-link to="/admin/security" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
+        Security
+        <span class="mt-1 block text-xs font-normal text-stone-500">Locks and protections</span>
+      </router-link>
+    </div>
+
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-medium uppercase text-stone-500">Pending requests</p>
@@ -100,6 +127,9 @@
         <li><router-link to="/admin/rooms" class="text-brand-600 hover:underline">Rooms</router-link></li>
         <li><router-link to="/admin/guests" class="text-brand-600 hover:underline">Guests</router-link></li>
         <li><router-link to="/admin/contacts" class="text-brand-600 hover:underline">Messages</router-link></li>
+        <li><router-link to="/admin/audit-log" class="text-brand-600 hover:underline">Audit log</router-link></li>
+        <li><router-link to="/admin/users" class="text-brand-600 hover:underline">Users</router-link></li>
+        <li><router-link to="/admin/security" class="text-brand-600 hover:underline">Security</router-link></li>
         <li><router-link to="/admin/finance-revenue" class="text-brand-600 hover:underline">Revenue</router-link></li>
         <li><router-link to="/admin/finance-expense" class="text-brand-600 hover:underline">Expenses</router-link></li>
         <li><router-link to="/admin/finance-profit" class="text-brand-600 hover:underline">Profit</router-link></li>

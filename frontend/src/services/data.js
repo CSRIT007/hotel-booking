@@ -313,6 +313,38 @@ export async function getUsers(params = {}) {
   return []
 }
 
+export async function createUser(payload) {
+  if (hasLocalApi) return await localApi.createUser(payload)
+  throw new Error('No API configured')
+}
+
+export async function updateUser(id, payload) {
+  if (hasLocalApi) return await localApi.updateUser(id, payload)
+  throw new Error('No API configured')
+}
+
+export async function unlockUser(id) {
+  if (hasLocalApi) return await localApi.unlockUser(id)
+  throw new Error('No API configured')
+}
+
+export async function resetUserPassword(id, password) {
+  if (hasLocalApi) return await localApi.resetUserPassword(id, password)
+  throw new Error('No API configured')
+}
+
+export async function getSecuritySummary() {
+  if (hasLocalApi) {
+    try {
+      return await localApi.getSecuritySummary()
+    } catch (e) {
+      console.warn('Local API getSecuritySummary failed:', e.message)
+      return null
+    }
+  }
+  return null
+}
+
 export async function getPosProducts(params = {}) {
   if (hasLocalApi) {
     try {
@@ -407,6 +439,18 @@ export async function deleteExpense(id) {
     }
   }
   throw new Error('No API configured')
+}
+
+export async function getAuditLogs(params = {}) {
+  if (hasLocalApi) {
+    try {
+      return await localApi.getAuditLogs(params)
+    } catch (e) {
+      console.warn('Local API getAuditLogs failed:', e.message)
+      return []
+    }
+  }
+  return []
 }
 
 export async function getMyBookings(userId) {

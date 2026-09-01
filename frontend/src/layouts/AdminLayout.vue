@@ -112,19 +112,23 @@
             <span>{{ openGroup === 'analytics' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'analytics'" class="admin-sub">
-            <router-link to="/admin/reports" class="admin-sub-link">Reports</router-link>
+            <router-link to="/admin/reports" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/reports') }">Reports</router-link>
             <router-link to="/admin/analytics-kpi" class="admin-sub-link">KPIs</router-link>
           </div>
         </div>
 
-        <router-link to="/admin/contacts" class="admin-nav" :class="{ 'admin-nav-active': isActive('/admin/contacts') }">
-          <span class="w-6 text-center">✉</span>
-          <span class="flex-1">Messages</span>
-          <span
-            v-if="newMessages > 0"
-            class="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white"
-          >{{ newMessages }}</span>
-        </router-link>
+        <div class="admin-nav-group">
+          <button type="button" class="admin-nav w-full justify-between" @click="toggle('admin')">
+            <span><span class="w-6 text-center inline-block">🛡</span> Admin</span>
+            <span>{{ openGroup === 'admin' ? '▼' : '▶' }}</span>
+          </button>
+          <div v-show="openGroup === 'admin'" class="admin-sub">
+            <router-link to="/admin/users" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/users') }">User management</router-link>
+            <router-link to="/admin/audit-log" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/audit-log') }">Audit log</router-link>
+            <router-link to="/admin/login-activity" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/login-activity') }">Login activity</router-link>
+            <router-link to="/admin/security" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/security') }">Security</router-link>
+          </div>
+        </div>
       </nav>
       <div class="border-t border-stone-700 p-3 space-y-1">
         <p class="px-4 py-1 text-xs text-stone-400">Signed in as {{ currentUser?.username }}</p>
@@ -139,18 +143,22 @@
         <h1 class="text-lg font-semibold text-stone-800">Admin</h1>
         <div class="ml-auto flex items-center gap-3">
           <router-link
-            v-if="newMessages > 0"
-            to="/admin/contacts"
-            class="hidden rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 sm:inline-flex"
-          >
-            {{ newMessages }} new message{{ newMessages === 1 ? '' : 's' }}
-          </router-link>
-          <router-link
             v-if="pendingBookings > 0"
             to="/admin/bookings?status=pending"
             class="hidden rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 sm:inline-flex"
           >
             {{ pendingBookings }} booking request{{ pendingBookings === 1 ? '' : 's' }}
+          </router-link>
+          <router-link
+            to="/admin/contacts"
+            class="relative inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
+            :class="{ 'bg-stone-100 dark:bg-stone-800': isActive('/admin/contacts') }"
+          >
+            Messages
+            <span
+              v-if="newMessages > 0"
+              class="inline-flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+            >{{ newMessages }}</span>
           </router-link>
           <ThemeToggle />
         </div>
@@ -221,7 +229,8 @@ watch([newMessages, () => route.meta.title], () => {
 
 watch(() => route.path, (path) => {
   refresh()
-  if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/properties') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
+  if (path === '/admin' || path === '/admin/') openGroup.value = 'pms'
+  else if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/properties') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
   else if (path.startsWith('/admin/pos')) openGroup.value = 'pos'
   else if (path.startsWith('/admin/crs')) openGroup.value = 'crs'
   else if (path.startsWith('/admin/crm')) openGroup.value = 'crm'
@@ -229,6 +238,7 @@ watch(() => route.path, (path) => {
   else if (path.startsWith('/admin/hr')) openGroup.value = 'hr'
   else if (path.startsWith('/admin/maintenance')) openGroup.value = 'maintenance'
   else if (path.startsWith('/admin/reports') || path.startsWith('/admin/analytics')) openGroup.value = 'analytics'
+  else if (path.startsWith('/admin/audit-log') || path.startsWith('/admin/users') || path.startsWith('/admin/login-activity') || path.startsWith('/admin/security')) openGroup.value = 'admin'
 }, { immediate: true })
 </script>
 

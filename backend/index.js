@@ -37,7 +37,7 @@ app.use(express.json())
 app.use((_req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*')
   res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
-  res.set('Access-Control-Allow-Headers', 'Content-Type')
+  res.set('Access-Control-Allow-Headers', 'Content-Type, X-User-Id, X-User-Name, X-User-Role')
   next()
 })
 app.options('*', (_req, res) => res.sendStatus(204))
@@ -48,6 +48,44 @@ function ensureImagePath(path) {
   return path.startsWith('/') ? path : `/${path}`
 }
 
+function actorFromReq(req, fallback = {}) {
+  const id = parseInt(req.get('x-user-id') || fallback.id || 0, 10) || null
+  const name = String(req.get('x-user-name') || fallback.name || 'Guest').slice(0, 100)
+  const role = String(req.get('x-user-role') || fallback.role || 'guest').slice(0, 20)
+  const forwarded = req.headers['x-forwarded-for']
+  const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.socket?.remoteAddress || null
+  return { id, name, role, ip }
+}
+
+function requireStaff(req, res) {
+  if (String(req.get('x-user-role') || '') !== 'staff') {
+    res.status(403).json({ error: 'Staff access required.' })
+    return false
+  }
+  return true
+}
+
+const PASSWORD_MIN = 8
+const LOGIN_FAIL_LIMIT = 5
+const LOCKOUT_MINUTES = 15
+
+function isPasswordStrong(password) {
+  return typeof password === 'string' && password.length >= PASSWORD_MIN
+}
+
+async function writeAudit(req, { action, entity, entityId = null, summary, details = null, actor = null }) {
+  try {
+    const a = actor || actorFromReq(req)
+    await pool.query(
+      `INSERT INTO audit_logs (actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [a.id, a.name, a.role, action, entity, entityId, summary, details ? JSON.stringify(details) : null, a.ip]
+    )
+  } catch (e) {
+    console.warn('Audit log skipped:', e.message)
+  }
+}
+
 // ----- Auth -----
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -56,23 +94,79 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Please fill in all fields.' })
     }
     const r = await pool.query(
-      'SELECT id, username, email, password, role FROM users WHERE email = $1 OR username = $2 LIMIT 1',
+      `SELECT id, username, email, password, role,
+              COALESCE(status, 'active') AS status,
+              COALESCE(failed_login_count, 0) AS failed_login_count,
+              locked_until, last_login_at
+       FROM users WHERE email = $1 OR username = $2 LIMIT 1`,
       [loginId, loginId]
     )
     const user = r.rows[0]
     if (!user || !user.password) {
+      await writeAudit(req, {
+        action: 'login_failed',
+        entity: 'user',
+        summary: `Failed login for ${loginId}`,
+        actor: { id: null, name: String(loginId).slice(0, 100), role: 'guest', ip: actorFromReq(req).ip },
+      })
       return res.status(401).json({ error: 'Invalid email/username or password.' })
+    }
+    if (user.status === 'disabled') {
+      await writeAudit(req, {
+        action: 'login_blocked',
+        entity: 'user',
+        entityId: user.id,
+        summary: `Disabled account ${user.username} tried to sign in`,
+      })
+      return res.status(403).json({ error: 'This account is disabled. Contact an administrator.' })
+    }
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(423).json({
+        error: `Account locked after too many failed sign-ins. Try again after ${new Date(user.locked_until).toLocaleTimeString()}.`,
+      })
     }
     let passwordOk = false
     try {
       passwordOk = await bcrypt.compare(password, user.password)
     } catch (_) {
-      // e.g. invalid hash in DB (wrong format)
       return res.status(401).json({ error: 'Invalid email/username or password.' })
     }
     if (!passwordOk) {
-      return res.status(401).json({ error: 'Invalid email/username or password.' })
+      const fails = Number(user.failed_login_count || 0) + 1
+      const lock = fails >= LOGIN_FAIL_LIMIT
+      await pool.query(
+        `UPDATE users
+         SET failed_login_count = $1,
+             locked_until = CASE WHEN $2 THEN NOW() + ($3::int * INTERVAL '1 minute') ELSE locked_until END
+         WHERE id = $4`,
+        [fails, lock, LOCKOUT_MINUTES, user.id]
+      )
+      await writeAudit(req, {
+        action: 'login_failed',
+        entity: 'user',
+        entityId: user.id,
+        summary: lock
+          ? `${user.username} locked after ${fails} failed sign-ins`
+          : `Failed login for ${user.username} (${fails}/${LOGIN_FAIL_LIMIT})`,
+        actor: { id: null, name: user.username, role: user.role || 'guest', ip: actorFromReq(req).ip },
+      })
+      return res.status(401).json({
+        error: lock
+          ? `Too many failed sign-ins. Account locked for ${LOCKOUT_MINUTES} minutes.`
+          : 'Invalid email/username or password.',
+      })
     }
+    await pool.query(
+      'UPDATE users SET failed_login_count = 0, locked_until = NULL, last_login_at = NOW() WHERE id = $1',
+      [user.id]
+    )
+    await writeAudit(req, {
+      action: 'login',
+      entity: 'user',
+      entityId: user.id,
+      summary: `${user.username} signed in`,
+      actor: { id: user.id, name: user.username, role: user.role || 'guest', ip: actorFromReq(req).ip },
+    })
     res.json({ user: { id: user.id, username: user.username, email: user.email, role: user.role || 'guest' } })
   } catch (e) {
     console.error('Login error:', e.message)
@@ -90,8 +184,8 @@ app.post('/api/auth/register', async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Please fill in all fields.' })
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters long.' })
+    if (!isPasswordStrong(password)) {
+      return res.status(400).json({ error: `Password must be at least ${PASSWORD_MIN} characters.` })
     }
     const exist = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $2 LIMIT 1', [email, username])
     if (exist.rows.length) {
@@ -105,6 +199,13 @@ app.post('/api/auth/register', async (req, res) => {
       [username, email, hash, 'guest']
     )
     const u = ins.rows[0]
+    await writeAudit(req, {
+      action: 'register',
+      entity: 'user',
+      entityId: u.id,
+      summary: `${u.username} created a guest account`,
+      actor: { id: u.id, name: u.username, role: 'guest', ip: actorFromReq(req).ip },
+    })
     res.json({ user: { id: u.id, username: u.username, email: u.email, role: u.role || 'guest' } })
   } catch (e) {
     res.status(500).json({ error: e.message || 'Registration failed' })
@@ -174,6 +275,12 @@ app.post('/api/hotels', async (req, res) => {
       [String(name).trim(), description || '', String(location).trim(), image || null]
     )
     const row = r.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'property',
+      entityId: row.id,
+      summary: `Added property “${row.name}”`,
+    })
     res.status(201).json({ ...row, image: ensureImagePath(row.image) })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -194,6 +301,12 @@ app.patch('/api/hotels/:id', async (req, res) => {
       `UPDATE hotels SET name = $1, description = $2, location = $3, image = $4 WHERE id = $5 RETURNING *`,
       [nextName, description != null ? description : row.description, nextLocation, image != null ? image : row.image, req.params.id]
     )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'property',
+      entityId: r.rows[0].id,
+      summary: `Updated property “${r.rows[0].name}”`,
+    })
     res.json({ ...r.rows[0], image: ensureImagePath(r.rows[0].image) })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -202,8 +315,14 @@ app.patch('/api/hotels/:id', async (req, res) => {
 
 app.delete('/api/hotels/:id', async (req, res) => {
   try {
-    const r = await pool.query('DELETE FROM hotels WHERE id = $1 RETURNING id', [req.params.id])
+    const r = await pool.query('DELETE FROM hotels WHERE id = $1 RETURNING id, name', [req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Property not found' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'property',
+      entityId: r.rows[0].id,
+      summary: `Removed property “${r.rows[0].name}”`,
+    })
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -239,7 +358,14 @@ app.post('/api/rooms', async (req, res) => {
       'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
       [r.rows[0].id]
     )
-    res.status(201).json({ ...details.rows[0], image: ensureImagePath(details.rows[0].image) })
+    const created = details.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'room',
+      entityId: created.id,
+      summary: `Added room “${created.name}” at ${created.hotel_name}`,
+    })
+    res.status(201).json({ ...created, image: ensureImagePath(created.image) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -280,7 +406,14 @@ app.patch('/api/rooms/:id', async (req, res) => {
       'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
       [r.rows[0].id]
     )
-    res.json({ ...details.rows[0], image: ensureImagePath(details.rows[0].image) })
+    const updated = details.rows[0]
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'room',
+      entityId: updated.id,
+      summary: `Updated room “${updated.name}” (${updated.status})`,
+    })
+    res.json({ ...updated, image: ensureImagePath(updated.image) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -288,8 +421,14 @@ app.patch('/api/rooms/:id', async (req, res) => {
 
 app.delete('/api/rooms/:id', async (req, res) => {
   try {
-    const r = await pool.query('DELETE FROM rooms WHERE id = $1 RETURNING id', [req.params.id])
+    const r = await pool.query('DELETE FROM rooms WHERE id = $1 RETURNING id, name', [req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Room not found' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'room',
+      entityId: r.rows[0].id,
+      summary: `Removed room “${r.rows[0].name}”`,
+    })
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -394,6 +533,12 @@ app.patch('/api/bookings/:id', async (req, res) => {
       }
     }
 
+    await writeAudit(req, {
+      action: status,
+      entity: 'booking',
+      entityId: booking.id,
+      summary: `Booking #${booking.id} marked ${status}`,
+    })
     res.json(booking)
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -411,7 +556,14 @@ app.post('/api/bookings', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [user_id, room_id, check_in, check_out, guests || 1, total_price, status || 'pending']
     )
-    res.status(201).json(r.rows[0])
+    const created = r.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'booking',
+      entityId: created.id,
+      summary: `Booking request #${created.id}`,
+    })
+    res.status(201).json(created)
   } catch (e) {
     res.status(500).json({ error: e.message || 'Booking failed' })
   }
@@ -438,9 +590,14 @@ app.get('/api/services', async (_req, res) => {
 })
 
 app.get('/api/users', async (req, res) => {
+  if (!requireStaff(req, res)) return
   try {
     const role = req.query.role
-    let query = 'SELECT id, username, email, role, created_at FROM users WHERE 1=1'
+    let query = `SELECT id, username, email, role, created_at,
+                        COALESCE(status, 'active') AS status,
+                        COALESCE(failed_login_count, 0) AS failed_login_count,
+                        locked_until, last_login_at
+                 FROM users WHERE 1=1`
     const params = []
     if (role) {
       params.push(role)
@@ -449,6 +606,172 @@ app.get('/api/users', async (req, res) => {
     query += ' ORDER BY id'
     const r = await pool.query(query, params)
     res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/users', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { username, email, password, role } = req.body || {}
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email and password are required.' })
+    }
+    if (!isPasswordStrong(password)) {
+      return res.status(400).json({ error: `Password must be at least ${PASSWORD_MIN} characters.` })
+    }
+    const nextRole = role === 'staff' ? 'staff' : 'guest'
+    const exist = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $2 LIMIT 1', [email, username])
+    if (exist.rows.length) return res.status(400).json({ error: 'Username or email already exists.' })
+    const hash = await bcrypt.hash(password, 10)
+    const ins = await pool.query(
+      `INSERT INTO users (username, email, password, role, status)
+       VALUES ($1, $2, $3, $4, 'active')
+       RETURNING id, username, email, role, created_at, status, failed_login_count, locked_until, last_login_at`,
+      [String(username).trim(), String(email).trim(), hash, nextRole]
+    )
+    const row = ins.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'user',
+      entityId: row.id,
+      summary: `Created ${nextRole} account “${row.username}”`,
+    })
+    res.status(201).json(row)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/users/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const id = parseInt(req.params.id, 10)
+    const actorId = parseInt(req.get('x-user-id') || '0', 10)
+    const current = await pool.query(
+      `SELECT id, username, email, role, COALESCE(status, 'active') AS status
+       FROM users WHERE id = $1`,
+      [id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'User not found' })
+    const row = current.rows[0]
+    const nextRole = req.body?.role != null ? req.body.role : row.role
+    const nextStatus = req.body?.status != null ? req.body.status : row.status
+    if (!['guest', 'staff'].includes(nextRole)) return res.status(400).json({ error: 'Role must be guest or staff.' })
+    if (!['active', 'disabled'].includes(nextStatus)) return res.status(400).json({ error: 'Status must be active or disabled.' })
+    if (actorId && actorId === id && nextStatus === 'disabled') {
+      return res.status(400).json({ error: 'You cannot disable your own account.' })
+    }
+    if (actorId && actorId === id && nextRole !== 'staff') {
+      return res.status(400).json({ error: 'You cannot remove your own staff access.' })
+    }
+    if (row.role === 'staff' && (nextRole !== 'staff' || nextStatus === 'disabled')) {
+      const staffLeft = await pool.query(
+        `SELECT COUNT(*) AS count FROM users
+         WHERE role = 'staff' AND COALESCE(status, 'active') = 'active' AND id <> $1`,
+        [id]
+      )
+      if (parseInt(staffLeft.rows[0].count, 10) < 1) {
+        return res.status(400).json({ error: 'Keep at least one active staff account.' })
+      }
+    }
+    const updated = await pool.query(
+      `UPDATE users SET role = $1, status = $2 WHERE id = $3
+       RETURNING id, username, email, role, created_at, status, failed_login_count, locked_until, last_login_at`,
+      [nextRole, nextStatus, id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'user',
+      entityId: id,
+      summary: `Updated ${updated.rows[0].username} (role ${nextRole}, ${nextStatus})`,
+    })
+    res.json(updated.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/users/:id/unlock', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const updated = await pool.query(
+      `UPDATE users SET failed_login_count = 0, locked_until = NULL, status = COALESCE(status, 'active')
+       WHERE id = $1
+       RETURNING id, username, email, role, created_at, status, failed_login_count, locked_until, last_login_at`,
+      [req.params.id]
+    )
+    if (!updated.rows[0]) return res.status(404).json({ error: 'User not found' })
+    await writeAudit(req, {
+      action: 'unlock',
+      entity: 'user',
+      entityId: updated.rows[0].id,
+      summary: `Unlocked account “${updated.rows[0].username}”`,
+    })
+    res.json(updated.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/users/:id/password', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const password = req.body?.password
+    if (!isPasswordStrong(password)) {
+      return res.status(400).json({ error: `Password must be at least ${PASSWORD_MIN} characters.` })
+    }
+    const current = await pool.query('SELECT id, username FROM users WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'User not found' })
+    const hash = await bcrypt.hash(password, 10)
+    await pool.query('UPDATE users SET password = $1, failed_login_count = 0, locked_until = NULL WHERE id = $2', [hash, req.params.id])
+    await writeAudit(req, {
+      action: 'password_reset',
+      entity: 'user',
+      entityId: current.rows[0].id,
+      summary: `Reset password for “${current.rows[0].username}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/security/summary', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const [counts, locked, failed] = await Promise.all([
+      pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE role = 'staff') AS staff,
+           COUNT(*) FILTER (WHERE role = 'guest') AS guests,
+           COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'disabled') AS disabled,
+           COUNT(*) FILTER (WHERE locked_until IS NOT NULL AND locked_until > NOW()) AS locked
+         FROM users`
+      ),
+      pool.query(
+        `SELECT id, username, email, role, locked_until, COALESCE(failed_login_count, 0) AS failed_login_count
+         FROM users
+         WHERE locked_until IS NOT NULL AND locked_until > NOW()
+         ORDER BY locked_until DESC`
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS count FROM audit_logs
+         WHERE action = 'login_failed' AND created_at > NOW() - INTERVAL '24 hours'`
+      ),
+    ])
+    res.json({
+      staff: parseInt(counts.rows[0].staff, 10),
+      guests: parseInt(counts.rows[0].guests, 10),
+      disabled: parseInt(counts.rows[0].disabled, 10),
+      locked: parseInt(counts.rows[0].locked, 10),
+      failed_logins_24h: parseInt(failed.rows[0].count, 10),
+      locked_accounts: locked.rows,
+      password_min: PASSWORD_MIN,
+      login_fail_limit: LOGIN_FAIL_LIMIT,
+      lockout_minutes: LOCKOUT_MINUTES,
+    })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -494,6 +817,12 @@ app.patch('/api/contacts/:id', async (req, res) => {
     }
     const r = await pool.query('UPDATE contacts SET status = $1 WHERE id = $2 RETURNING *', [status, req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' })
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'message',
+      entityId: r.rows[0].id,
+      summary: `Message from ${r.rows[0].name} marked ${status}`,
+    })
     res.json(r.rows[0])
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -510,6 +839,13 @@ app.post('/api/contacts', async (req, res) => {
       'INSERT INTO contacts (name, email, subject, message, status) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, email, subject, message, status',
       [name, email, subject || '', message, 'new']
     )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'message',
+      entityId: r.rows[0].id,
+      summary: `New message from ${name}${subject ? `: ${subject}` : ''}`,
+      actor: { id: actorFromReq(req).id, name, role: actorFromReq(req).role, ip: actorFromReq(req).ip },
+    })
     res.status(201).json(r.rows[0])
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to send message' })
@@ -591,7 +927,14 @@ app.post('/api/pos-transactions', async (req, res) => {
       [inserted.rows[0].id]
     )
 
-    res.status(201).json(row.rows[0])
+    const sale = row.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'pos',
+      entityId: sale.id,
+      summary: `POS sale ${sale.product_name} × ${sale.quantity} ($${Number(sale.total_amount).toFixed(2)})`,
+    })
+    res.status(201).json(sale)
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to create POS transaction' })
   }
@@ -682,7 +1025,14 @@ app.post('/api/expenses', async (req, res) => {
                  payment_method, created_at`,
       [desc, cat, value, date, method]
     )
-    res.status(201).json(mapExpense(r.rows[0]))
+    const saved = mapExpense(r.rows[0])
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'expense',
+      entityId: saved.id,
+      summary: `Recorded expense “${saved.description}” ($${Number(saved.amount).toFixed(2)})`,
+    })
+    res.status(201).json(saved)
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to create expense' })
   }
@@ -690,8 +1040,14 @@ app.post('/api/expenses', async (req, res) => {
 
 app.delete('/api/expenses/:id', async (req, res) => {
   try {
-    const r = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING id', [req.params.id])
+    const r = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING id, description, amount', [req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Expense not found' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'expense',
+      entityId: r.rows[0].id,
+      summary: `Deleted expense “${r.rows[0].description}”`,
+    })
     res.json({ ok: true, id: r.rows[0].id })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -748,6 +1104,64 @@ async function ensureGuestTables() {
   `)
 }
 
+async function ensureUserSecurity() {
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INT DEFAULT 0`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`)
+}
+
+async function ensureAuditTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id SERIAL PRIMARY KEY,
+      actor_id INT REFERENCES users(id) ON DELETE SET NULL,
+      actor_name VARCHAR(100),
+      actor_role VARCHAR(20),
+      action VARCHAR(50) NOT NULL,
+      entity VARCHAR(50) NOT NULL,
+      entity_id INT,
+      summary TEXT NOT NULL,
+      details JSONB,
+      ip_address VARCHAR(45),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity)')
+}
+
+app.get('/api/audit-logs', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const entity = req.query.entity
+    const action = req.query.action
+    const conditions = []
+    const params = []
+    let idx = 1
+    if (entity) {
+      conditions.push(`entity = $${idx++}`)
+      params.push(entity)
+    }
+    if (action) {
+      conditions.push(`action = $${idx++}`)
+      params.push(action)
+    }
+    const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : ''
+    const r = await pool.query(
+      `SELECT id, actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address, created_at
+       FROM audit_logs
+       ${where}
+       ORDER BY created_at DESC
+       LIMIT 300`,
+      params
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/notifications', async (req, res) => {
   try {
     const userId = req.query.user_id
@@ -781,6 +1195,8 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 pool.query('SELECT 1').then(async () => {
   await ensureFinanceTables()
   await ensureGuestTables()
+  await ensureAuditTable()
+  await ensureUserSecurity()
   app.listen(PORT, () => {
     console.log(`Hotel Booking API (Node + pg) at http://localhost:${PORT}`)
     console.log(`  PostgreSQL: ${process.env.PGDATABASE || 'hotel_booking'}`)

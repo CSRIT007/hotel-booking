@@ -31,10 +31,10 @@
             type="password"
             required
             autocomplete="new-password"
-            minlength="6"
+            minlength="8"
             class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
-          <p class="mt-0.5 text-xs text-stone-500">At least 6 characters</p>
+          <p class="mt-0.5 text-xs text-stone-500">At least 8 characters</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-stone-700">Confirm password</label>

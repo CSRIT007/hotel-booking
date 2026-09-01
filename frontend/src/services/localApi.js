@@ -10,6 +10,20 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+client.interceptors.request.use((config) => {
+  try {
+    const u = JSON.parse(localStorage.getItem('hotel_user') || 'null')
+    if (u?.id) {
+      config.headers['X-User-Id'] = String(u.id)
+      config.headers['X-User-Name'] = u.username || u.email || ''
+      config.headers['X-User-Role'] = u.role || 'guest'
+    }
+  } catch {
+    /* ignore */
+  }
+  return config
+})
+
 function throwApiError(e, fallback) {
   throw new Error(e.response?.data?.error || e.message || fallback)
 }
@@ -134,6 +148,47 @@ export async function getUsers(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function createUser(payload) {
+  try {
+    const { data } = await client.post('/api/users', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to create user')
+  }
+}
+
+export async function updateUser(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/users/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update user')
+  }
+}
+
+export async function unlockUser(id) {
+  try {
+    const { data } = await client.post(`/api/users/${id}/unlock`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to unlock user')
+  }
+}
+
+export async function resetUserPassword(id, password) {
+  try {
+    const { data } = await client.post(`/api/users/${id}/password`, { password })
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to reset password')
+  }
+}
+
+export async function getSecuritySummary() {
+  const { data } = await client.get('/api/security/summary')
+  return data
+}
+
 // POS Products (admin, from PostgreSQL)
 export async function getPosProducts() {
   const { data } = await client.get('/api/pos-products')
@@ -179,4 +234,9 @@ export async function createExpense(payload) {
 export async function deleteExpense(id) {
   const { data } = await client.delete(`/api/expenses/${id}`)
   return data
+}
+
+export async function getAuditLogs(params = {}) {
+  const { data } = await client.get('/api/audit-logs', { params })
+  return Array.isArray(data) ? data : []
 }
