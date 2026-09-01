@@ -964,7 +964,6 @@ async function ensureFinanceTables() {
        VALUES
          ('Electricity bill', 'Utilities', 420.00, CURRENT_DATE - 12, 'bank_transfer'),
          ('Housekeeping supplies', 'Supplies', 85.50, CURRENT_DATE - 8, 'cash'),
-         ('Staff wages (week)', 'Salaries', 1500.00, CURRENT_DATE - 5, 'bank_transfer'),
          ('Facebook ads', 'Marketing', 120.00, CURRENT_DATE - 3, 'card'),
          ('AC repair — Suite Room', 'Maintenance', 95.00, CURRENT_DATE - 1, 'cash')`
     )
@@ -974,6 +973,62 @@ async function ensureFinanceTables() {
 function toMoney(n) {
   const v = Number(n)
   return Number.isFinite(v) ? v : 0
+}
+
+function payrollExpenseMethod(method) {
+  if (method === 'cash' || method === 'bank_transfer') return method
+  return 'other'
+}
+
+async function syncPayrollExpense(payrollId) {
+  const r = await pool.query(
+    `SELECT p.id, p.net_pay, p.payment_method, p.status,
+            to_char(p.payment_date, 'YYYY-MM-DD') AS payment_date,
+            to_char(p.period_start, 'YYYY-MM-DD') AS period_start,
+            to_char(p.period_end, 'YYYY-MM-DD') AS period_end,
+            e.full_name
+     FROM hr_payroll p
+     JOIN hr_employees e ON e.id = p.employee_id
+     WHERE p.id = $1`,
+    [payrollId]
+  )
+  const row = r.rows[0]
+  if (!row || row.status !== 'paid') return null
+  const description = `Payroll — ${row.full_name} (${row.period_start} to ${row.period_end})`
+  const amount = toMoney(row.net_pay)
+  const date = row.payment_date || new Date().toISOString().slice(0, 10)
+  const method = payrollExpenseMethod(row.payment_method)
+  const existing = await pool.query('SELECT id FROM expenses WHERE payroll_id = $1', [payrollId])
+  if (existing.rows[0]) {
+    await pool.query(
+      `UPDATE expenses
+       SET description = $1, category = 'Salaries', amount = $2, expense_date = $3, payment_method = $4
+       WHERE id = $5`,
+      [description, amount, date, method, existing.rows[0].id]
+    )
+    return existing.rows[0].id
+  }
+  const ins = await pool.query(
+    `INSERT INTO expenses (description, category, amount, expense_date, payment_method, payroll_id)
+     VALUES ($1, 'Salaries', $2, $3, $4, $5)
+     RETURNING id`,
+    [description, amount, date, method, payrollId]
+  )
+  return ins.rows[0].id
+}
+
+async function ensurePayrollExpenseLink() {
+  await pool.query(`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payroll_id INT UNIQUE REFERENCES hr_payroll(id) ON DELETE RESTRICT`)
+  await pool.query(`DELETE FROM expenses WHERE description = 'Staff wages (week)' AND payroll_id IS NULL`)
+  const missing = await pool.query(
+    `SELECT p.id
+     FROM hr_payroll p
+     LEFT JOIN expenses x ON x.payroll_id = p.id
+     WHERE p.status = 'paid' AND x.id IS NULL`
+  )
+  for (const row of missing.rows) {
+    await syncPayrollExpense(row.id)
+  }
 }
 
 function mapExpense(row) {
@@ -996,7 +1051,7 @@ app.get('/api/expenses', async (_req, res) => {
     const r = await pool.query(
       `SELECT id, description, category, amount,
               to_char(expense_date, 'YYYY-MM-DD') AS expense_date,
-              payment_method, created_at
+              payment_method, payroll_id, created_at
        FROM expenses
        ORDER BY expense_date DESC, id DESC`
     )
@@ -1022,7 +1077,7 @@ app.post('/api/expenses', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, description, category, amount,
                  to_char(expense_date, 'YYYY-MM-DD') AS expense_date,
-                 payment_method, created_at`,
+                 payment_method, payroll_id, created_at`,
       [desc, cat, value, date, method]
     )
     const saved = mapExpense(r.rows[0])
@@ -1040,6 +1095,11 @@ app.post('/api/expenses', async (req, res) => {
 
 app.delete('/api/expenses/:id', async (req, res) => {
   try {
+    const current = await pool.query('SELECT id, description, amount, payroll_id FROM expenses WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Expense not found' })
+    if (current.rows[0].payroll_id) {
+      return res.status(400).json({ error: 'This expense comes from payroll. Change or keep it on the Payroll page.' })
+    }
     const r = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING id, description, amount', [req.params.id])
     if (!r.rows[0]) return res.status(404).json({ error: 'Expense not found' })
     await writeAudit(req, {
@@ -1492,9 +1552,10 @@ app.get('/api/hr/payroll', async (req, res) => {
               to_char(p.period_end, 'YYYY-MM-DD') AS period_end,
               p.base_salary, p.overtime_pay, p.bonuses, p.deductions, p.net_pay,
               to_char(p.payment_date, 'YYYY-MM-DD') AS payment_date,
-              p.payment_method, p.status, p.notes
+              p.payment_method, p.status, p.notes, x.id AS expense_id
        FROM hr_payroll p
        JOIN hr_employees e ON e.id = p.employee_id
+       LEFT JOIN expenses x ON x.payroll_id = p.id
        ORDER BY p.period_end DESC, p.id DESC`
     )
     res.json(r.rows.map((row) => ({
@@ -1585,7 +1646,17 @@ app.patch('/api/hr/payroll/:id', async (req, res) => {
           [st, req.params.id]
         )
     await writeAudit(req, { action: 'update', entity: 'hr_payroll', entityId: r.rows[0].id, summary: `Payroll marked ${st}` })
-    res.json({ ok: true, status: r.rows[0].status, payment_date: r.rows[0].payment_date })
+    let expenseId = null
+    if (st === 'paid') {
+      expenseId = await syncPayrollExpense(r.rows[0].id)
+      await writeAudit(req, {
+        action: 'create',
+        entity: 'expense',
+        entityId: expenseId,
+        summary: `Salary expense from payroll #${r.rows[0].id}`,
+      })
+    }
+    res.json({ ok: true, status: r.rows[0].status, payment_date: r.rows[0].payment_date, expense_id: expenseId })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1683,6 +1754,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 pool.query('SELECT 1').then(async () => {
   await ensureFinanceTables()
   await ensureHrTables()
+  await ensurePayrollExpenseLink()
   await ensureGuestTables()
   await ensureAuditTable()
   await ensureUserSecurity()

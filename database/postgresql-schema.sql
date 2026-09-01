@@ -225,7 +225,6 @@ SELECT v.description, v.category, v.amount, CURRENT_DATE - v.days_ago, v.payment
 FROM (VALUES
   ('Electricity bill', 'Utilities', 420.00, 12, 'bank_transfer'),
   ('Housekeeping supplies', 'Supplies', 85.50, 8, 'cash'),
-  ('Staff wages (week)', 'Salaries', 1500.00, 5, 'bank_transfer'),
   ('Facebook ads', 'Marketing', 120.00, 3, 'card'),
   ('AC repair - Suite Room', 'Maintenance', 95.00, 1, 'cash')
 ) AS v(description, category, amount, days_ago, payment_method)
@@ -276,6 +275,8 @@ CREATE TABLE IF NOT EXISTS hr_payroll (
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payroll_id INT UNIQUE REFERENCES hr_payroll(id) ON DELETE RESTRICT;
 
 CREATE TABLE IF NOT EXISTS hr_leaves (
     id SERIAL PRIMARY KEY,

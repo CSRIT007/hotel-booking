@@ -2,7 +2,7 @@
   <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Profit</h1>
     <p class="mt-1 text-stone-600">
-      Profit = recognized revenue (rooms + paid POS) − recorded expenses.
+      Profit = recognized revenue (rooms + paid POS) − recorded expenses, including salaries from paid payroll.
     </p>
 
     <FinanceDateFilter v-model:from="from" v-model:to="to" />

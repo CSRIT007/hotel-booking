@@ -2,7 +2,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Payroll</h1>
     <p class="mt-1 text-stone-600">
-      Net pay = base + overtime + bonuses − deductions. New records save as <strong>draft</strong>, then <strong>approve</strong>, then <strong>mark paid</strong>.
+      Net pay = base + overtime + bonuses − deductions. New records save as <strong>draft</strong>, then <strong>approve</strong>, then <strong>mark paid</strong>. Paid payroll is posted to Finance → Expenses as Salaries.
     </p>
 
     <div class="mt-6 grid gap-4 sm:grid-cols-3">
@@ -105,6 +105,7 @@
                 <td class="px-4 py-3 text-stone-600">
                   {{ p.period_start }} → {{ p.period_end }}
                   <p v-if="p.payment_date" class="text-xs text-stone-400">Paid {{ p.payment_date }}</p>
+                  <router-link v-if="p.expense_id" to="/admin/finance-expense" class="block text-xs text-brand-600 hover:underline">Expense #{{ p.expense_id }}</router-link>
                 </td>
                 <td class="px-4 py-3 text-right text-stone-600">{{ formatMoney(p.base_salary + p.overtime_pay + p.bonuses) }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ formatMoney(p.net_pay) }}</td>

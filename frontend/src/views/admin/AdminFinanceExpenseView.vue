@@ -1,7 +1,7 @@
 <template>
   <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Expenses</h1>
-    <p class="mt-1 text-stone-600">Record operating costs. These are subtracted from revenue on the Profit page.</p>
+    <p class="mt-1 text-stone-600">Record operating costs. Paid payroll is added here automatically as Salaries and cannot be deleted from this page.</p>
 
     <FinanceDateFilter v-model:from="from" v-model:to="to" />
 
@@ -126,12 +126,16 @@
           <tbody class="divide-y divide-stone-200">
             <tr v-for="e in visibleExpenses" :key="e.id" class="hover:bg-stone-50">
               <td class="px-4 py-3 text-stone-600">{{ formatDate(e.expense_date) }}</td>
-              <td class="px-4 py-3 font-medium text-stone-800">{{ e.description }}</td>
+              <td class="px-4 py-3 font-medium text-stone-800">
+                {{ e.description }}
+                <p v-if="e.payroll_id" class="text-xs font-normal text-brand-700">From payroll #{{ e.payroll_id }}</p>
+              </td>
               <td class="px-4 py-3 text-stone-600">{{ e.category }}</td>
               <td class="px-4 py-3 capitalize text-stone-600">{{ String(e.payment_method || '').replace('_', ' ') }}</td>
               <td class="px-4 py-3 text-right">{{ formatMoney(e.amount) }}</td>
               <td class="px-4 py-3 text-right">
-                <button type="button" class="text-red-600 hover:underline" @click="removeExpense(e)">Delete</button>
+                <button v-if="!e.payroll_id" type="button" class="text-red-600 hover:underline" @click="removeExpense(e)">Delete</button>
+                <router-link v-else to="/admin/hr-payroll" class="text-brand-600 hover:underline">Payroll</router-link>
               </td>
             </tr>
           </tbody>
