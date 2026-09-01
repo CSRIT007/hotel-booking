@@ -36,7 +36,7 @@ const app = express()
 app.use(express.json())
 app.use((_req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*')
-  res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS')
+  res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
   res.set('Access-Control-Allow-Headers', 'Content-Type')
   next()
 })
@@ -392,9 +392,147 @@ app.post('/api/pos-transactions', async (req, res) => {
   }
 })
 
+const EXPENSE_CATEGORIES = ['Utilities', 'Salaries', 'Supplies', 'Marketing', 'Maintenance', 'Food & Beverage', 'Other']
+const EXPENSE_PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'other']
+
+async function ensureFinanceTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      description VARCHAR(255) NOT NULL,
+      category VARCHAR(100) NOT NULL DEFAULT 'Other',
+      amount DECIMAL(12, 2) NOT NULL CHECK (amount >= 0),
+      expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'card', 'bank_transfer', 'other')),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)')
+  const existing = await pool.query('SELECT 1 FROM expenses LIMIT 1')
+  if (!existing.rows.length) {
+    await pool.query(
+      `INSERT INTO expenses (description, category, amount, expense_date, payment_method)
+       VALUES
+         ('Electricity bill', 'Utilities', 420.00, CURRENT_DATE - 12, 'bank_transfer'),
+         ('Housekeeping supplies', 'Supplies', 85.50, CURRENT_DATE - 8, 'cash'),
+         ('Staff wages (week)', 'Salaries', 1500.00, CURRENT_DATE - 5, 'bank_transfer'),
+         ('Facebook ads', 'Marketing', 120.00, CURRENT_DATE - 3, 'card'),
+         ('AC repair — Suite Room', 'Maintenance', 95.00, CURRENT_DATE - 1, 'cash')`
+    )
+  }
+}
+
+function toMoney(n) {
+  const v = Number(n)
+  return Number.isFinite(v) ? v : 0
+}
+
+function mapExpense(row) {
+  if (!row) return row
+  const d = row.expense_date
+  if (d instanceof Date) {
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return { ...row, amount: toMoney(row.amount), expense_date: `${y}-${m}-${day}` }
+  }
+  if (typeof d === 'string' && d.length >= 10) {
+    return { ...row, amount: toMoney(row.amount), expense_date: d.slice(0, 10) }
+  }
+  return { ...row, amount: toMoney(row.amount) }
+}
+
+app.get('/api/expenses', async (_req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, description, category, amount,
+              to_char(expense_date, 'YYYY-MM-DD') AS expense_date,
+              payment_method, created_at
+       FROM expenses
+       ORDER BY expense_date DESC, id DESC`
+    )
+    res.json(r.rows.map(mapExpense))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/expenses', async (req, res) => {
+  try {
+    const { description, category, amount, expense_date, payment_method } = req.body || {}
+    const desc = String(description || '').trim()
+    const value = Number(amount)
+    if (!desc || !Number.isFinite(value) || value < 0) {
+      return res.status(400).json({ error: 'description and a valid amount are required.' })
+    }
+    const cat = EXPENSE_CATEGORIES.includes(category) ? category : (category || 'Other')
+    const method = EXPENSE_PAYMENT_METHODS.includes(payment_method) ? payment_method : 'cash'
+    const date = expense_date || new Date().toISOString().slice(0, 10)
+    const r = await pool.query(
+      `INSERT INTO expenses (description, category, amount, expense_date, payment_method)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, description, category, amount,
+                 to_char(expense_date, 'YYYY-MM-DD') AS expense_date,
+                 payment_method, created_at`,
+      [desc, cat, value, date, method]
+    )
+    res.status(201).json(mapExpense(r.rows[0]))
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to create expense' })
+  }
+})
+
+app.delete('/api/expenses/:id', async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Expense not found' })
+    res.json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/finance/summary', async (_req, res) => {
+  try {
+    const [bookings, pos, expenses] = await Promise.all([
+      pool.query(`SELECT status, COALESCE(SUM(total_price), 0) AS total, COUNT(*)::int AS count FROM bookings GROUP BY status`),
+      pool.query(`SELECT status, COALESCE(SUM(total_amount), 0) AS total, COUNT(*)::int AS count FROM pos_transactions GROUP BY status`),
+      pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*)::int AS count FROM expenses`),
+    ])
+    const bookingByStatus = Object.fromEntries(bookings.rows.map((row) => [row.status, { total: toMoney(row.total), count: row.count }]))
+    const posByStatus = Object.fromEntries(pos.rows.map((row) => [row.status, { total: toMoney(row.total), count: row.count }]))
+    const roomRevenue = toMoney(bookingByStatus.confirmed?.total) + toMoney(bookingByStatus.completed?.total)
+    const posRevenue = toMoney(posByStatus.paid?.total)
+    const revenue = roomRevenue + posRevenue
+    const expenseTotal = toMoney(expenses.rows[0]?.total)
+    const profit = revenue - expenseTotal
+    res.json({
+      roomRevenue,
+      posRevenue,
+      revenue,
+      expenses: expenseTotal,
+      profit,
+      marginPercent: revenue > 0 ? (profit / revenue) * 100 : 0,
+      pendingRevenue: toMoney(bookingByStatus.pending?.total) + toMoney(posByStatus.pending?.total),
+      refundedPos: toMoney(posByStatus.refunded?.total),
+      counts: {
+        confirmedBookings: bookingByStatus.confirmed?.count || 0,
+        completedBookings: bookingByStatus.completed?.count || 0,
+        pendingBookings: bookingByStatus.pending?.count || 0,
+        paidPos: posByStatus.paid?.count || 0,
+        expenses: expenses.rows[0]?.count || 0,
+      },
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
-pool.query('SELECT 1').then(() => {
+pool.query('SELECT 1').then(async () => {
+  await ensureFinanceTables()
   app.listen(PORT, () => {
     console.log(`Hotel Booking API (Node + pg) at http://localhost:${PORT}`)
     console.log(`  PostgreSQL: ${process.env.PGDATABASE || 'hotel_booking'}`)

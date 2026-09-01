@@ -332,3 +332,37 @@ export async function updateContactStatus(id, status) {
   }
   throw new Error('No API configured')
 }
+
+export async function getExpenses() {
+  if (hasLocalApi) {
+    try {
+      return await localApi.getExpenses()
+    } catch (e) {
+      console.warn('Local API getExpenses failed:', e.message)
+      return []
+    }
+  }
+  return []
+}
+
+export async function createExpense(payload) {
+  if (hasLocalApi) {
+    try {
+      return await localApi.createExpense(payload)
+    } catch (e) {
+      throw new Error(e.response?.data?.error || e.message || 'Failed to save expense')
+    }
+  }
+  throw new Error('No API configured')
+}
+
+export async function deleteExpense(id) {
+  if (hasLocalApi) {
+    try {
+      return await localApi.deleteExpense(id)
+    } catch (e) {
+      throw new Error(e.response?.data?.error || e.message || 'Failed to delete expense')
+    }
+  }
+  throw new Error('No API configured')
+}

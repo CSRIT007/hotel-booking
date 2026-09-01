@@ -1,5 +1,6 @@
 -- ============================================================================
--- Hotel Booking — PostgreSQL schema for Tadabase / PostgreSQL
+-- Hotel Booking — PostgreSQL schema
+-- dialect: postgres
 -- ============================================================================
 -- Use this as reference to create tables in Tadabase (Tadabase uses PostgreSQL).
 -- In Tadabase you create tables in the UI; field names below match the app.
@@ -130,6 +131,19 @@ CREATE TABLE IF NOT EXISTS pos_transactions (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Expenses (Finance > Expenses)
+CREATE TABLE IF NOT EXISTS expenses (
+    id SERIAL PRIMARY KEY,
+    description VARCHAR(255) NOT NULL,
+    category VARCHAR(100) NOT NULL DEFAULT 'Other',
+    amount DECIMAL(12, 2) NOT NULL CHECK (amount >= 0),
+    expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    payment_method VARCHAR(20) NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'card', 'bank_transfer', 'other')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+
 -- ============================================================================
 -- Sample data (only inserted when tables are empty)
 -- ============================================================================
@@ -184,3 +198,14 @@ SELECT * FROM (VALUES
   (5, 1, 15.00, 'card', 'refunded')
 ) AS v(product_id, quantity, total_amount, payment_method, status)
 WHERE NOT EXISTS (SELECT 1 FROM pos_transactions LIMIT 1);
+
+INSERT INTO expenses (description, category, amount, expense_date, payment_method)
+SELECT v.description, v.category, v.amount, CURRENT_DATE - v.days_ago, v.payment_method
+FROM (VALUES
+  ('Electricity bill', 'Utilities', 420.00, 12, 'bank_transfer'),
+  ('Housekeeping supplies', 'Supplies', 85.50, 8, 'cash'),
+  ('Staff wages (week)', 'Salaries', 1500.00, 5, 'bank_transfer'),
+  ('Facebook ads', 'Marketing', 120.00, 3, 'card'),
+  ('AC repair - Suite Room', 'Maintenance', 95.00, 1, 'cash')
+) AS v(description, category, amount, days_ago, payment_method)
+WHERE NOT EXISTS (SELECT 1 FROM expenses LIMIT 1);

@@ -87,3 +87,18 @@ export async function createPosTransaction(payload) {
   const { data } = await client.post('/api/pos-transactions', payload)
   return data
 }
+
+export async function getExpenses() {
+  const { data } = await client.get('/api/expenses')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createExpense(payload) {
+  const { data } = await client.post('/api/expenses', payload)
+  return data
+}
+
+export async function deleteExpense(id) {
+  const { data } = await client.delete(`/api/expenses/${id}`)
+  return data
+}

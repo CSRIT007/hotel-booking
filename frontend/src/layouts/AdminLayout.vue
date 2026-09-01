@@ -71,9 +71,9 @@
             <span>{{ openGroup === 'finance' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'finance'" class="admin-sub">
-            <router-link to="/admin/finance-revenue" class="admin-sub-link">Revenue</router-link>
-            <router-link to="/admin/finance-expense" class="admin-sub-link">Expenses</router-link>
-            <router-link to="/admin/finance-profit" class="admin-sub-link">Profit</router-link>
+            <router-link to="/admin/finance-revenue" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/finance-revenue') }">Revenue</router-link>
+            <router-link to="/admin/finance-expense" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/finance-expense') }">Expenses</router-link>
+            <router-link to="/admin/finance-profit" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/finance-profit') }">Profit</router-link>
           </div>
         </div>
 

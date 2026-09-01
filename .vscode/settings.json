@@ -1,5 +1,10 @@
 {
   "workbench.sideBar.location": "left",
   "workbench.panel.defaultLocation": "bottom",
-  "workbench.activityBar.location": "default"
+  "workbench.activityBar.location": "default",
+  "files.associations": {
+    "**/postgresql-schema.sql": "postgres",
+    "**/sample-data-postgres.sql": "postgres"
+  },
+  "mssql.intelliSense.enableIntelliSense": false
 }

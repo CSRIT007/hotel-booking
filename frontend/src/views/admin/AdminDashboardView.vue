@@ -96,7 +96,9 @@
         <li><router-link to="/admin/rooms" class="text-brand-600 hover:underline">Rooms</router-link></li>
         <li><router-link to="/admin/guests" class="text-brand-600 hover:underline">Guests</router-link></li>
         <li><router-link to="/admin/contacts" class="text-brand-600 hover:underline">Messages</router-link></li>
-        <li><router-link to="/admin/reports" class="text-brand-600 hover:underline">Reports</router-link></li>
+        <li><router-link to="/admin/finance-revenue" class="text-brand-600 hover:underline">Revenue</router-link></li>
+        <li><router-link to="/admin/finance-expense" class="text-brand-600 hover:underline">Expenses</router-link></li>
+        <li><router-link to="/admin/finance-profit" class="text-brand-600 hover:underline">Profit</router-link></li>
       </ul>
     </div>
   </div>
