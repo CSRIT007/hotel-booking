@@ -1,0 +1,60 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║              🔧 FIX DATABASE ERROR - SIMPLE STEPS            ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+ERROR: Table 'hotel_booking.guest_profiles' doesn't exist
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ SOLUTION (30 seconds):
+
+1. Open your web browser
+
+2. Go to this URL:
+   
+   http://localhost/hotel-booking/fix-now.php
+
+3. Wait 5 seconds while tables are created
+
+4. Click "Test Guest Page" button
+
+5. Done! Error is fixed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT THIS DOES:
+
+✓ Creates guest_profiles table
+✓ Creates housekeeping_tasks table
+✓ Creates room_amenities table
+✓ Creates loyalty_transactions table
+✓ Creates staff_profiles table
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+AUTOMATIC DETECTION:
+
+Now when you visit any PMS page, if tables are missing, you'll see
+a beautiful setup screen with a "Fix Database Now" button.
+
+Just click it and the problem is solved automatically!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PAGES THAT NOW AUTO-DETECT MISSING TABLES:
+
+✓ staff/pms-guests.php
+✓ staff/pms-bookings.php
+✓ staff/pms-housekeeping.php
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SUMMARY:
+
+Just open: http://localhost/hotel-booking/fix-now.php
+
+That's it! 🎉
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

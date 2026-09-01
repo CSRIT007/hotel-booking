@@ -1,0 +1,137 @@
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║            🏪 POS DATABASE SETUP - QUICK START               ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+
+STEP 1: CREATE POS TABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open your browser and go to:
+
+http://localhost/hotel-booking/setup-pos-tables.php
+
+OR
+
+http://hotel-booking.test/setup-pos-tables.php
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT THIS DOES:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Creates 4 POS tables:
+   - pos_categories (Product categories)
+   - pos_products (Products with pricing & stock)
+   - pos_transactions (Sales records)
+   - pos_transaction_items (Line items)
+
+✅ Adds sample data:
+   - 4 categories (Restaurant, Bar, Spa, Gift Shop)
+   - 17 sample products with prices and stock
+   - Ready to use immediately!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+EXPECTED RESULT:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You should see:
+
+✅ Created table pos_categories
+✅ Created table pos_products
+✅ Created table pos_transactions
+✅ Created table pos_transaction_items
+✅ Added category: Restaurant
+✅ Added category: Bar
+✅ Added category: Spa
+✅ Added category: Gift Shop
+✅ Added 17 sample products
+
+🎉 All POS tables are ready!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+STEP 2: TEST THE SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+After setup completes, click these buttons:
+
+1. POS Dashboard - View overview
+2. Manage Products - See sample products
+3. Make a Sale - Create test transaction
+4. View Transactions - See sales history
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+SAMPLE PRODUCTS INCLUDED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Restaurant:
+- Breakfast Buffet ($25.00)
+- Lunch Special ($18.00)
+- Dinner Set Menu ($45.00)
+- Kids Meal ($12.00)
+
+Bar:
+- House Wine ($8.00)
+- Premium Cocktail ($15.00)
+- Beer ($6.00)
+- Soft Drink ($4.00)
+- Coffee/Tea ($5.00)
+
+Spa:
+- Swedish Massage ($80.00)
+- Facial Treatment ($70.00)
+- Manicure & Pedicure ($50.00)
+- Body Scrub ($60.00)
+
+Gift Shop:
+- Hotel T-Shirt ($25.00)
+- Postcard Set ($8.00)
+- Keychain ($5.00)
+- Toiletries Kit ($15.00)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ALTERNATIVE: FULL DATABASE IMPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you want ALL tables for ALL 15 modules:
+
+http://localhost/hotel-booking/import-pms-tables.php
+
+This imports 60+ tables from:
+database/hotel-management-system.sql
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TROUBLESHOOTING:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Issue: "Table already exists"
+→ This is OK! It means tables are already created.
+
+Issue: Foreign key error
+→ Make sure base tables exist (users, bookings, rooms)
+→ Run database/database.sql first
+
+Issue: Access denied
+→ Check MySQL is running in Laragon
+→ Check database name is "hotel_booking"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUICK START:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Open: http://localhost/hotel-booking/setup-pos-tables.php
+2. Wait 5 seconds
+3. Click "POS Dashboard"
+4. Start using the system!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+THAT'S IT! Your POS system is ready to use! 🎉
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,0 +1,14 @@
+{
+  "name": "hotel-booking-database",
+  "private": true,
+  "type": "module",
+  "description": "Scripts to create and setup PostgreSQL database for hotel-booking",
+  "scripts": {
+    "create": "node setup-postgres.js",
+    "psql": "/opt/homebrew/opt/postgresql@16/bin/psql -d hotel_booking",
+    "view-data": "/opt/homebrew/opt/postgresql@16/bin/psql -d hotel_booking -f view-all-data.sql"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}

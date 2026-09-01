@@ -1,0 +1,72 @@
+================================================================================
+  FIX MYSQL 9.4 ERROR: "redo log file comes from other data directory"
+================================================================================
+
+Use these steps to fix MySQL 9.4 and keep using it. Your database is not deleted.
+
+--------------------------------------------------------------------------------
+STEP 1: Stop MySQL
+--------------------------------------------------------------------------------
+- If the "MySQL Server" or "start-mysql" window is open, close it.
+- Or press any key in that window so it exits.
+- MySQL must be completely stopped before Step 2.
+
+--------------------------------------------------------------------------------
+STEP 2: Run the fix (rename bad redo logs)
+--------------------------------------------------------------------------------
+1. Open File Explorer.
+2. Go to:  C:\laragon\www\hotel-booking
+3. Double-click:  fix-mysql-redo-log.bat
+4. Read the message (your database is safe; we only rename log files).
+5. Wait until it says "Done. Old redo logs renamed to innodb_redo_backup."
+6. Press any key to close the window.
+
+--------------------------------------------------------------------------------
+STEP 3: Start MySQL 9.4 again
+--------------------------------------------------------------------------------
+1. In the same folder, double-click:  start-mysql.bat
+2. A black window will open. Leave it OPEN.
+3. Wait until you see something like "ready for connections" (or no new errors).
+4. Do not close this window while you use phpMyAdmin or the hotel-booking app.
+
+--------------------------------------------------------------------------------
+STEP 4: Check that it works
+--------------------------------------------------------------------------------
+1. Open Chrome (or any browser).
+2. Go to:  http://localhost/phpmyadmin/
+3. Log in with:
+   - Username:  root
+   - Password:  (leave empty)
+4. If you see the phpMyAdmin dashboard, MySQL 9.4 is fixed.
+
+--------------------------------------------------------------------------------
+If you see "Neither found #innodb_redo subdirectory, nor ib_logfile*"
+--------------------------------------------------------------------------------
+You ran the first fix and MySQL now can't find the folder. Do this:
+1. Make sure MySQL is stopped (close start-mysql window).
+2. Double-click:  fix-mysql-redo-log-2.bat
+   (It restores the folder and clears only the bad log files inside.)
+3. Then run start-mysql.bat again and keep the window open.
+
+If the fix batch file says "Rename failed"
+--------------------------------------------------------------------------------
+Do it manually:
+1. Open File Explorer.
+2. Go to:  C:\laragon\data\mysql-9.4
+3. Find the folder named:  #innodb_redo  (or innodb_redo_backup)
+4. Right-click it -> Rename -> type:  innodb_redo_backup  (or #innodb_redo)
+5. Press Enter.
+6. Then run start-mysql.bat again.
+
+--------------------------------------------------------------------------------
+Summary
+--------------------------------------------------------------------------------
+  Step 1: Close MySQL (close start-mysql window).
+  Step 2: Run fix-mysql-redo-log.bat (double-click).
+  Step 3: Run start-mysql.bat (double-click, keep window open).
+  Step 4: Open http://localhost/phpmyadmin/ and log in as root.
+
+Your hotel_booking database and data stay in place. Only the broken log folder
+is renamed so MySQL 9.4 can create a new one and start correctly.
+
+================================================================================
