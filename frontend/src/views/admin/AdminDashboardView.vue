@@ -133,6 +133,10 @@
         <li><router-link to="/admin/finance-revenue" class="text-brand-600 hover:underline">Revenue</router-link></li>
         <li><router-link to="/admin/finance-expense" class="text-brand-600 hover:underline">Expenses</router-link></li>
         <li><router-link to="/admin/finance-profit" class="text-brand-600 hover:underline">Profit</router-link></li>
+        <li><router-link to="/admin/hr-employees" class="text-brand-600 hover:underline">Employees</router-link></li>
+        <li><router-link to="/admin/hr-schedules" class="text-brand-600 hover:underline">Schedules</router-link></li>
+        <li><router-link to="/admin/hr-payroll" class="text-brand-600 hover:underline">Payroll</router-link></li>
+        <li><router-link to="/admin/hr-leaves" class="text-brand-600 hover:underline">Leaves</router-link></li>
       </ul>
     </div>
   </div>

@@ -240,3 +240,131 @@ export async function getAuditLogs(params = {}) {
   const { data } = await client.get('/api/audit-logs', { params })
   return Array.isArray(data) ? data : []
 }
+
+export async function getHrEmployees() {
+  const { data } = await client.get('/api/hr/employees')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createHrEmployee(payload) {
+  try {
+    const { data } = await client.post('/api/hr/employees', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add employee')
+  }
+}
+
+export async function updateHrEmployee(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/employees/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update employee')
+  }
+}
+
+export async function deleteHrEmployee(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/employees/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove employee')
+  }
+}
+
+export async function getHrSchedules() {
+  const { data } = await client.get('/api/hr/schedules')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createHrSchedule(payload) {
+  try {
+    const { data } = await client.post('/api/hr/schedules', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add shift')
+  }
+}
+
+export async function updateHrSchedule(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/schedules/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update shift')
+  }
+}
+
+export async function deleteHrSchedule(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/schedules/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove shift')
+  }
+}
+
+export async function getHrPayroll() {
+  const { data } = await client.get('/api/hr/payroll')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createHrPayroll(payload) {
+  try {
+    const { data } = await client.post('/api/hr/payroll', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to save payroll')
+  }
+}
+
+export async function updateHrPayroll(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/payroll/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update payroll')
+  }
+}
+
+export async function deleteHrPayroll(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/payroll/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete payroll')
+  }
+}
+
+export async function getHrLeaves() {
+  const { data } = await client.get('/api/hr/leaves')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createHrLeave(payload) {
+  try {
+    const { data } = await client.post('/api/hr/leaves', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add leave')
+  }
+}
+
+export async function updateHrLeave(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/leaves/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update leave')
+  }
+}
+
+export async function deleteHrLeave(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/leaves/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete leave')
+  }
+}

@@ -36,13 +36,65 @@ export function monthKey(value) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export function formatDate(value) {
-  if (!value) return '—'
+export function localDateKey(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(d.getTime())) return ''
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+export function toDateKey(value) {
+  if (!value) return ''
   const text = String(value)
-  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10)
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return text
-  return d.toISOString().slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  if (/^\d{4}-\d{2}-\d{2}/.test(text) && !text.includes('T') && !text.includes(' ')) return text.slice(0, 10)
+  return localDateKey(value)
+}
+
+export function formatDate(value) {
+  return toDateKey(value) || '—'
+}
+
+export function bookingFinanceDate(booking) {
+  return booking?.created_at || booking?.check_in
+}
+
+export function posFinanceDate(tx) {
+  return tx?.created_at || tx?.transaction_date
+}
+
+export function expenseFinanceDate(expense) {
+  return expense?.expense_date || expense?.created_at
+}
+
+export function inDateRange(value, from, to) {
+  const key = toDateKey(value)
+  if (!from && !to) return true
+  if (!key) return false
+  if (from && key < from) return false
+  if (to && key > to) return false
+  return true
+}
+
+export function filterByDateRange(items, from, to, getDate) {
+  const list = !from && !to ? items : items.filter((item) => inDateRange(getDate(item), from, to))
+  return list.slice().sort((a, b) => toDateKey(getDate(b)).localeCompare(toDateKey(getDate(a))))
+}
+
+export function dateRangePresets(now = new Date()) {
+  const today = localDateKey(now)
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const yearStart = `${now.getFullYear()}-01-01`
+  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
+  return {
+    today: { from: today, to: today, label: 'Today' },
+    week: { from: localDateKey(weekAgo), to: today, label: 'Last 7 days' },
+    month: { from: monthStart, to: today, label: 'This month' },
+    year: { from: yearStart, to: today, label: 'This year' },
+    all: { from: '', to: '', label: 'All dates' },
+  }
 }
 
 export function isRoomRevenue(booking) {
@@ -113,7 +165,7 @@ export function monthlySeries({ bookings = [], transactions = [], expenses = [] 
     room[key] = (room[key] || 0) + toMoney(b.total_price)
   }
   for (const t of transactions.filter(isPosRevenue)) {
-    const key = monthKey(t.created_at)
+    const key = monthKey(t.created_at || t.transaction_date)
     months.add(key)
     pos[key] = (pos[key] || 0) + toMoney(t.total_amount)
   }

@@ -1,7 +1,9 @@
 <template>
-  <div>
+  <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Expenses</h1>
     <p class="mt-1 text-stone-600">Record operating costs. These are subtracted from revenue on the Profit page.</p>
+
+    <FinanceDateFilter v-model:from="from" v-model:to="to" />
 
     <div class="mt-6 grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <div class="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
@@ -91,7 +93,7 @@
           </div>
           <div>
             <p class="text-xs font-medium uppercase text-stone-500">Records</p>
-            <p class="mt-2 text-xl font-semibold text-stone-900">{{ expenses.length }}</p>
+            <p class="mt-2 text-xl font-semibold text-stone-900">{{ visibleExpenses.length }}</p>
           </div>
         </div>
         <div class="mt-5 space-y-2">
@@ -122,7 +124,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
-            <tr v-for="e in expenses" :key="e.id" class="hover:bg-stone-50">
+            <tr v-for="e in visibleExpenses" :key="e.id" class="hover:bg-stone-50">
               <td class="px-4 py-3 text-stone-600">{{ formatDate(e.expense_date) }}</td>
               <td class="px-4 py-3 font-medium text-stone-800">{{ e.description }}</td>
               <td class="px-4 py-3 text-stone-600">{{ e.category }}</td>
@@ -135,7 +137,7 @@
           </tbody>
         </table>
       </div>
-      <p v-if="expenses.length === 0 && !loading" class="p-4 text-center text-stone-500">No expenses recorded.</p>
+      <p v-if="visibleExpenses.length === 0 && !loading" class="p-4 text-center text-stone-500">No expenses in this date range.</p>
       <p v-if="loading" class="p-4 text-center text-stone-500">Loading…</p>
     </div>
   </div>
@@ -143,25 +145,42 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
 import { createExpense, deleteExpense, getExpenses } from '../../services/data'
-import { EXPENSE_CATEGORIES, formatDate, formatMoney, groupSum, toMoney } from '../../services/finance'
+import {
+  EXPENSE_CATEGORIES,
+  dateRangePresets,
+  expenseFinanceDate,
+  filterByDateRange,
+  formatDate,
+  formatMoney,
+  groupSum,
+  localDateKey,
+  toMoney,
+} from '../../services/finance'
 
 const expenses = ref([])
 const loading = ref(true)
 const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
+const monthRange = dateRangePresets().month
+const from = ref(monthRange.from)
+const to = ref(monthRange.to)
 
 const form = reactive({
   description: '',
   category: 'Utilities',
   amount: 0,
-  expense_date: new Date().toISOString().slice(0, 10),
+  expense_date: localDateKey(),
   payment_method: 'cash',
 })
 
-const totalAmount = computed(() => expenses.value.reduce((sum, e) => sum + toMoney(e.amount), 0))
-const byCategory = computed(() => groupSum(expenses.value, (e) => e.category, (e) => e.amount))
+const visibleExpenses = computed(() =>
+  filterByDateRange(expenses.value, from.value, to.value, expenseFinanceDate)
+)
+const totalAmount = computed(() => visibleExpenses.value.reduce((sum, e) => sum + toMoney(e.amount), 0))
+const byCategory = computed(() => groupSum(visibleExpenses.value, (e) => e.category, (e) => e.amount))
 
 async function load() {
   loading.value = true
@@ -207,3 +226,9 @@ async function removeExpense(row) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.finance-root {
+  overflow-anchor: none;
+}
+</style>

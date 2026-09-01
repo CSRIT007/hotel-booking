@@ -1,9 +1,11 @@
 <template>
-  <div>
+  <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Revenue</h1>
     <p class="mt-1 text-stone-600">
       Recognized income from confirmed/completed room bookings and paid POS sales.
     </p>
+
+    <FinanceDateFilter v-model:from="from" v-model:to="to" />
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div class="rounded-xl border border-green-200 bg-white p-4 shadow-sm">
@@ -84,6 +86,7 @@
         <table class="min-w-full divide-y divide-stone-200 text-sm">
           <thead class="bg-stone-50">
             <tr>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">Date</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">ID</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Guest</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Room</th>
@@ -93,6 +96,7 @@
           </thead>
           <tbody class="divide-y divide-stone-200">
             <tr v-for="b in summary.roomItems" :key="'b-' + b.id" class="hover:bg-stone-50">
+              <td class="whitespace-nowrap px-4 py-3 text-stone-600">{{ formatDate(bookingFinanceDate(b)) }}</td>
               <td class="px-4 py-3 text-stone-500">#{{ b.id }}</td>
               <td class="px-4 py-3">{{ b.username || b.email || '—' }}</td>
               <td class="px-4 py-3">{{ b.room_name || '—' }}</td>
@@ -103,7 +107,38 @@
         </table>
       </div>
       <p v-if="summary.roomItems.length === 0 && !loading" class="p-4 text-center text-stone-500">
-        No confirmed or completed bookings.
+        No confirmed or completed bookings in this date range.
+      </p>
+    </div>
+
+    <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+      <div class="border-b border-stone-200 px-4 py-3">
+        <h2 class="font-semibold text-stone-800">POS sales counted as revenue</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-stone-200 text-sm">
+          <thead class="bg-stone-50">
+            <tr>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">Date</th>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">ID</th>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">Product</th>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">Status</th>
+              <th class="px-4 py-3 text-right font-medium text-stone-700">Amount</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-stone-200">
+            <tr v-for="t in summary.posItems" :key="'p-' + t.id" class="hover:bg-stone-50">
+              <td class="whitespace-nowrap px-4 py-3 text-stone-600">{{ formatDate(posFinanceDate(t)) }}</td>
+              <td class="px-4 py-3 text-stone-500">#{{ t.id }}</td>
+              <td class="px-4 py-3">{{ t.product_name || t.product_name_text || ('Product #' + (t.product_id || t.product || '—')) }}</td>
+              <td class="px-4 py-3 capitalize">{{ t.status }}</td>
+              <td class="px-4 py-3 text-right font-medium">{{ formatMoney(t.total_amount) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="summary.posItems.length === 0 && !loading" class="p-4 text-center text-stone-500">
+        No paid POS sales in this date range.
       </p>
     </div>
 
@@ -113,18 +148,38 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
 import { getBookings, getPosTransactions } from '../../services/data'
-import { formatMoney, monthlySeries, summarizeFinance } from '../../services/finance'
+import {
+  bookingFinanceDate,
+  dateRangePresets,
+  filterByDateRange,
+  formatDate,
+  formatMoney,
+  monthlySeries,
+  posFinanceDate,
+  summarizeFinance,
+} from '../../services/finance'
 
 const bookings = ref([])
 const transactions = ref([])
 const loading = ref(true)
+const monthRange = dateRangePresets().month
+const from = ref(monthRange.from)
+const to = ref(monthRange.to)
+
+const rangedBookings = computed(() =>
+  filterByDateRange(bookings.value, from.value, to.value, bookingFinanceDate)
+)
+const rangedTransactions = computed(() =>
+  filterByDateRange(transactions.value, from.value, to.value, posFinanceDate)
+)
 
 const summary = computed(() =>
-  summarizeFinance({ bookings: bookings.value, transactions: transactions.value })
+  summarizeFinance({ bookings: rangedBookings.value, transactions: rangedTransactions.value })
 )
 const months = computed(() =>
-  monthlySeries({ bookings: bookings.value, transactions: transactions.value })
+  monthlySeries({ bookings: rangedBookings.value, transactions: rangedTransactions.value })
 )
 const sourceRows = computed(() => [
   { name: 'Room bookings', total: summary.value.roomRevenue },
@@ -148,3 +203,9 @@ onMounted(async () => {
   loading.value = false
 })
 </script>
+
+<style scoped>
+.finance-root {
+  overflow-anchor: none;
+}
+</style>

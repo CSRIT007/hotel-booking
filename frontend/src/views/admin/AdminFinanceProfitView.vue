@@ -1,9 +1,11 @@
 <template>
-  <div>
+  <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Profit</h1>
     <p class="mt-1 text-stone-600">
       Profit = recognized revenue (rooms + paid POS) − recorded expenses.
     </p>
+
+    <FinanceDateFilter v-model:from="from" v-model:to="to" />
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <div class="rounded-xl border border-green-200 bg-white p-4 shadow-sm">
@@ -86,7 +88,7 @@
               </td>
             </tr>
             <tr v-if="months.length === 0 && !loading">
-              <td colspan="4" class="px-4 py-8 text-center text-stone-500">No monthly data yet.</td>
+              <td colspan="4" class="px-4 py-8 text-center text-stone-500">No monthly data in this date range.</td>
             </tr>
           </tbody>
         </table>
@@ -98,29 +100,53 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
 import { getBookings, getExpenses, getPosTransactions } from '../../services/data'
-import { formatMoney, groupSum, monthlySeries, summarizeFinance } from '../../services/finance'
+import {
+  bookingFinanceDate,
+  dateRangePresets,
+  expenseFinanceDate,
+  filterByDateRange,
+  formatMoney,
+  groupSum,
+  monthlySeries,
+  posFinanceDate,
+  summarizeFinance,
+} from '../../services/finance'
 
 const bookings = ref([])
 const transactions = ref([])
 const expenses = ref([])
 const loading = ref(true)
+const monthRange = dateRangePresets().month
+const from = ref(monthRange.from)
+const to = ref(monthRange.to)
+
+const rangedBookings = computed(() =>
+  filterByDateRange(bookings.value, from.value, to.value, bookingFinanceDate)
+)
+const rangedTransactions = computed(() =>
+  filterByDateRange(transactions.value, from.value, to.value, posFinanceDate)
+)
+const rangedExpenses = computed(() =>
+  filterByDateRange(expenses.value, from.value, to.value, expenseFinanceDate)
+)
 
 const summary = computed(() =>
   summarizeFinance({
-    bookings: bookings.value,
-    transactions: transactions.value,
-    expenses: expenses.value,
+    bookings: rangedBookings.value,
+    transactions: rangedTransactions.value,
+    expenses: rangedExpenses.value,
   })
 )
 const months = computed(() =>
   monthlySeries({
-    bookings: bookings.value,
-    transactions: transactions.value,
-    expenses: expenses.value,
+    bookings: rangedBookings.value,
+    transactions: rangedTransactions.value,
+    expenses: rangedExpenses.value,
   })
 )
-const expenseCategories = computed(() => groupSum(expenses.value, (e) => e.category, (e) => e.amount))
+const expenseCategories = computed(() => groupSum(rangedExpenses.value, (e) => e.category, (e) => e.amount))
 
 onMounted(async () => {
   loading.value = true
@@ -135,3 +161,9 @@ onMounted(async () => {
   loading.value = false
 })
 </script>
+
+<style scoped>
+.finance-root {
+  overflow-anchor: none;
+}
+</style>

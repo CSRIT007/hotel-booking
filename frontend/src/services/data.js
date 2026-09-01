@@ -453,6 +453,101 @@ export async function getAuditLogs(params = {}) {
   return []
 }
 
+function requireLocal(fn, fallback) {
+  if (!hasLocalApi) throw new Error('No API configured')
+  return fn().catch((e) => {
+    throw new Error(e.response?.data?.error || e.message || fallback)
+  })
+}
+
+export async function getHrEmployees() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getHrEmployees()
+  } catch (e) {
+    console.warn('Local API getHrEmployees failed:', e.message)
+    return []
+  }
+}
+
+export async function createHrEmployee(payload) {
+  return requireLocal(() => localApi.createHrEmployee(payload), 'Failed to add employee')
+}
+
+export async function updateHrEmployee(id, payload) {
+  return requireLocal(() => localApi.updateHrEmployee(id, payload), 'Failed to update employee')
+}
+
+export async function deleteHrEmployee(id) {
+  return requireLocal(() => localApi.deleteHrEmployee(id), 'Failed to remove employee')
+}
+
+export async function getHrSchedules() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getHrSchedules()
+  } catch (e) {
+    console.warn('Local API getHrSchedules failed:', e.message)
+    return []
+  }
+}
+
+export async function createHrSchedule(payload) {
+  return requireLocal(() => localApi.createHrSchedule(payload), 'Failed to add shift')
+}
+
+export async function updateHrSchedule(id, payload) {
+  return requireLocal(() => localApi.updateHrSchedule(id, payload), 'Failed to update shift')
+}
+
+export async function deleteHrSchedule(id) {
+  return requireLocal(() => localApi.deleteHrSchedule(id), 'Failed to remove shift')
+}
+
+export async function getHrPayroll() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getHrPayroll()
+  } catch (e) {
+    console.warn('Local API getHrPayroll failed:', e.message)
+    return []
+  }
+}
+
+export async function createHrPayroll(payload) {
+  return requireLocal(() => localApi.createHrPayroll(payload), 'Failed to save payroll')
+}
+
+export async function updateHrPayroll(id, payload) {
+  return requireLocal(() => localApi.updateHrPayroll(id, payload), 'Failed to update payroll')
+}
+
+export async function deleteHrPayroll(id) {
+  return requireLocal(() => localApi.deleteHrPayroll(id), 'Failed to delete payroll')
+}
+
+export async function getHrLeaves() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getHrLeaves()
+  } catch (e) {
+    console.warn('Local API getHrLeaves failed:', e.message)
+    return []
+  }
+}
+
+export async function createHrLeave(payload) {
+  return requireLocal(() => localApi.createHrLeave(payload), 'Failed to add leave')
+}
+
+export async function updateHrLeave(id, payload) {
+  return requireLocal(() => localApi.updateHrLeave(id, payload), 'Failed to update leave')
+}
+
+export async function deleteHrLeave(id) {
+  return requireLocal(() => localApi.deleteHrLeave(id), 'Failed to delete leave')
+}
+
 export async function getMyBookings(userId) {
   if (!userId) return []
   if (hasLocalApi) {

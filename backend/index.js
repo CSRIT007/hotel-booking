@@ -1190,10 +1190,499 @@ app.patch('/api/notifications/read', async (req, res) => {
   }
 })
 
+const HR_DEPARTMENTS = ['Front desk', 'Housekeeping', 'Food & Beverage', 'Maintenance', 'Management', 'Sales', 'Accounting', 'Security', 'Other']
+const HR_SHIFT_TYPES = ['morning', 'afternoon', 'evening', 'night']
+const HR_LEAVE_TYPES = ['vacation', 'sick', 'personal', 'unpaid', 'other']
+
+function daysInclusive(start, end) {
+  const a = new Date(start)
+  const b = new Date(end)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0
+  return Math.round((b - a) / 86400000) + 1
+}
+
+async function ensureHrTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_employees (
+      id SERIAL PRIMARY KEY,
+      employee_code VARCHAR(20) NOT NULL UNIQUE,
+      full_name VARCHAR(120) NOT NULL,
+      department VARCHAR(40) NOT NULL DEFAULT 'Other',
+      position VARCHAR(100) NOT NULL,
+      phone VARCHAR(30),
+      email VARCHAR(120),
+      hire_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      salary DECIMAL(12, 2) DEFAULT 0,
+      salary_type VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (salary_type IN ('hourly', 'monthly', 'annual')),
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'on_leave', 'terminated')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_schedules (
+      id SERIAL PRIMARY KEY,
+      employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+      shift_date DATE NOT NULL,
+      shift_start TIME NOT NULL,
+      shift_end TIME NOT NULL,
+      shift_type VARCHAR(20) NOT NULL DEFAULT 'morning' CHECK (shift_type IN ('morning', 'afternoon', 'evening', 'night')),
+      status VARCHAR(20) NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'absent', 'cancelled')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_payroll (
+      id SERIAL PRIMARY KEY,
+      employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE RESTRICT,
+      period_start DATE NOT NULL,
+      period_end DATE NOT NULL,
+      base_salary DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      overtime_pay DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      bonuses DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      deductions DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      net_pay DECIMAL(12, 2) NOT NULL DEFAULT 0,
+      payment_date DATE,
+      payment_method VARCHAR(20) NOT NULL DEFAULT 'bank_transfer' CHECK (payment_method IN ('bank_transfer', 'cash', 'check')),
+      status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'paid')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_leaves (
+      id SERIAL PRIMARY KEY,
+      employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+      leave_type VARCHAR(20) NOT NULL DEFAULT 'vacation' CHECK (leave_type IN ('vacation', 'sick', 'personal', 'unpaid', 'other')),
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      days_count INT NOT NULL DEFAULT 1,
+      reason TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_hr_emp_dept ON hr_employees(department)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_hr_sched_date ON hr_schedules(shift_date)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_hr_leave_status ON hr_leaves(status)')
+  const existing = await pool.query('SELECT 1 FROM hr_employees LIMIT 1')
+  if (existing.rows.length) {
+    await seedHrRelatedIfEmpty()
+    return
+  }
+  const ins = await pool.query(
+    `INSERT INTO hr_employees (employee_code, full_name, department, position, phone, email, hire_date, salary, salary_type, status)
+     VALUES
+       ('EMP-001', 'Sokha Chan', 'Front desk', 'Receptionist', '012 111 222', 'sokha@smilehotel.local', CURRENT_DATE - 420, 450, 'monthly', 'active'),
+       ('EMP-002', 'Dara Kim', 'Housekeeping', 'Housekeeping supervisor', '012 333 444', 'dara@smilehotel.local', CURRENT_DATE - 300, 520, 'monthly', 'active'),
+       ('EMP-003', 'Maly Chea', 'Food & Beverage', 'Restaurant captain', '012 555 666', 'maly@smilehotel.local', CURRENT_DATE - 210, 480, 'monthly', 'active'),
+       ('EMP-004', 'Vannak Ly', 'Maintenance', 'Technician', '012 777 888', 'vannak@smilehotel.local', CURRENT_DATE - 150, 500, 'monthly', 'active'),
+       ('EMP-005', 'Sreymom Hun', 'Management', 'Duty manager', '012 999 000', 'sreymom@smilehotel.local', CURRENT_DATE - 600, 850, 'monthly', 'active')
+     RETURNING id`
+  )
+  const ids = ins.rows.map((r) => r.id)
+  await pool.query(
+    `INSERT INTO hr_schedules (employee_id, shift_date, shift_start, shift_end, shift_type, status)
+     VALUES
+       ($1, CURRENT_DATE, '07:00', '15:00', 'morning', 'scheduled'),
+       ($2, CURRENT_DATE, '07:00', '15:00', 'morning', 'scheduled'),
+       ($3, CURRENT_DATE, '15:00', '23:00', 'afternoon', 'scheduled'),
+       ($4, CURRENT_DATE, '08:00', '17:00', 'morning', 'scheduled'),
+       ($5, CURRENT_DATE, '15:00', '23:00', 'afternoon', 'scheduled'),
+       ($1, CURRENT_DATE + 1, '07:00', '15:00', 'morning', 'scheduled'),
+       ($2, CURRENT_DATE + 1, '15:00', '23:00', 'afternoon', 'scheduled')`,
+    ids
+  )
+  await seedHrRelatedIfEmpty()
+}
+
+async function seedHrRelatedIfEmpty() {
+  const employees = await pool.query('SELECT id FROM hr_employees ORDER BY id')
+  const ids = employees.rows.map((r) => r.id)
+  if (ids.length < 3) return
+  const pay = await pool.query('SELECT 1 FROM hr_payroll LIMIT 1')
+  if (!pay.rows.length) {
+    await pool.query(
+      `INSERT INTO hr_payroll (employee_id, period_start, period_end, base_salary, overtime_pay, bonuses, deductions, net_pay, payment_date, payment_method, status)
+       VALUES
+         ($1, date_trunc('month', CURRENT_DATE) - INTERVAL '1 month', date_trunc('month', CURRENT_DATE) - INTERVAL '1 day', 450, 20, 0, 10, 460, CURRENT_DATE - 5, 'bank_transfer', 'paid'),
+         ($2, date_trunc('month', CURRENT_DATE) - INTERVAL '1 month', date_trunc('month', CURRENT_DATE) - INTERVAL '1 day', 520, 0, 30, 15, 535, CURRENT_DATE - 5, 'bank_transfer', 'paid'),
+         ($3, date_trunc('month', CURRENT_DATE) - INTERVAL '1 month', date_trunc('month', CURRENT_DATE) - INTERVAL '1 day', 480, 12, 0, 8, 484, NULL, 'bank_transfer', 'approved'),
+         ($4, date_trunc('month', CURRENT_DATE) - INTERVAL '1 month', date_trunc('month', CURRENT_DATE) - INTERVAL '1 day', 850, 0, 50, 20, 880, NULL, 'bank_transfer', 'draft')`,
+      [ids[0], ids[1], ids[2], ids[Math.min(4, ids.length - 1)]]
+    )
+  }
+  const leaves = await pool.query('SELECT 1 FROM hr_leaves LIMIT 1')
+  if (!leaves.rows.length) {
+    await pool.query(
+      `INSERT INTO hr_leaves (employee_id, leave_type, start_date, end_date, days_count, reason, status)
+       VALUES
+         ($1, 'vacation', CURRENT_DATE + 10, CURRENT_DATE + 12, 3, 'Family trip', 'pending'),
+         ($2, 'sick', CURRENT_DATE - 2, CURRENT_DATE - 1, 2, 'Flu', 'approved'),
+         ($3, 'personal', CURRENT_DATE + 20, CURRENT_DATE + 20, 1, 'Personal appointment', 'pending')`,
+      [ids[0], ids[1], ids[2]]
+    )
+  }
+}
+
+const EMPLOYEE_SELECT = `id, employee_code, full_name, department, position, phone, email,
+  to_char(hire_date, 'YYYY-MM-DD') AS hire_date, salary, salary_type, status, notes, created_at`
+
+app.get('/api/hr/employees', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(`SELECT ${EMPLOYEE_SELECT} FROM hr_employees ORDER BY id`)
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/employees', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { full_name, department, position, phone, email, hire_date, salary, salary_type, status, notes } = req.body || {}
+    const name = String(full_name || '').trim()
+    const job = String(position || '').trim()
+    if (!name || !job) return res.status(400).json({ error: 'Name and position are required.' })
+    const dept = HR_DEPARTMENTS.includes(department) ? department : 'Other'
+    const type = ['hourly', 'monthly', 'annual'].includes(salary_type) ? salary_type : 'monthly'
+    const st = ['active', 'on_leave', 'terminated'].includes(status) ? status : 'active'
+    const count = await pool.query('SELECT COUNT(*) AS n FROM hr_employees')
+    const code = `EMP-${String(parseInt(count.rows[0].n, 10) + 1).padStart(3, '0')}`
+    const r = await pool.query(
+      `INSERT INTO hr_employees (employee_code, full_name, department, position, phone, email, hire_date, salary, salary_type, status, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING ${EMPLOYEE_SELECT}`,
+      [code, name, dept, job, phone || null, email || null, hire_date || new Date().toISOString().slice(0, 10), toMoney(salary), type, st, notes || null]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_employee', entityId: r.rows[0].id, summary: `Added employee ${name} (${code})` })
+    res.status(201).json(r.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/employees/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(`SELECT ${EMPLOYEE_SELECT} FROM hr_employees WHERE id = $1`, [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Employee not found' })
+    const row = current.rows[0]
+    const next = {
+      department: HR_DEPARTMENTS.includes(req.body?.department) ? req.body.department : row.department,
+      position: String(req.body?.position || row.position).trim(),
+      phone: req.body?.phone != null ? req.body.phone : row.phone,
+      status: ['active', 'on_leave', 'terminated'].includes(req.body?.status) ? req.body.status : row.status,
+      salary: req.body?.salary != null ? toMoney(req.body.salary) : toMoney(row.salary),
+    }
+    const r = await pool.query(
+      `UPDATE hr_employees SET department = $1, position = $2, phone = $3, status = $4, salary = $5 WHERE id = $6
+       RETURNING ${EMPLOYEE_SELECT}`,
+      [next.department, next.position, next.phone, next.status, next.salary, req.params.id]
+    )
+    await writeAudit(req, { action: 'update', entity: 'hr_employee', entityId: r.rows[0].id, summary: `Updated employee ${r.rows[0].full_name}` })
+    res.json(r.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/employees/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM hr_employees WHERE id = $1 RETURNING id, full_name', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Employee not found' })
+    await writeAudit(req, { action: 'delete', entity: 'hr_employee', entityId: r.rows[0].id, summary: `Removed employee ${r.rows[0].full_name}` })
+    res.json({ ok: true })
+  } catch (e) {
+    if (e.code === '23503') return res.status(400).json({ error: 'Cannot delete an employee who still has payroll records.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/hr/schedules', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT s.id, s.employee_id, e.full_name, e.department, e.employee_code,
+              to_char(s.shift_date, 'YYYY-MM-DD') AS shift_date,
+              to_char(s.shift_start, 'HH24:MI') AS shift_start,
+              to_char(s.shift_end, 'HH24:MI') AS shift_end,
+              s.shift_type, s.status, s.notes
+       FROM hr_schedules s
+       JOIN hr_employees e ON e.id = s.employee_id
+       ORDER BY s.shift_date DESC, s.shift_start, s.id DESC`
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/schedules', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { employee_id, shift_date, shift_start, shift_end, shift_type, status, notes } = req.body || {}
+    if (!employee_id || !shift_date || !shift_start || !shift_end) {
+      return res.status(400).json({ error: 'Employee, date, start and end time are required.' })
+    }
+    const type = HR_SHIFT_TYPES.includes(shift_type) ? shift_type : 'morning'
+    const st = ['scheduled', 'completed', 'absent', 'cancelled'].includes(status) ? status : 'scheduled'
+    const r = await pool.query(
+      `INSERT INTO hr_schedules (employee_id, shift_date, shift_start, shift_end, shift_type, status, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [employee_id, shift_date, shift_start, shift_end, type, st, notes || null]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_schedule', entityId: r.rows[0].id, summary: `Scheduled shift on ${shift_date}` })
+    const saved = await pool.query(
+      `SELECT s.id, s.employee_id, e.full_name, e.department, e.employee_code,
+              to_char(s.shift_date, 'YYYY-MM-DD') AS shift_date,
+              to_char(s.shift_start, 'HH24:MI') AS shift_start,
+              to_char(s.shift_end, 'HH24:MI') AS shift_end,
+              s.shift_type, s.status, s.notes
+       FROM hr_schedules s JOIN hr_employees e ON e.id = s.employee_id WHERE s.id = $1`,
+      [r.rows[0].id]
+    )
+    res.status(201).json(saved.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/schedules/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const st = req.body?.status
+    if (!['scheduled', 'completed', 'absent', 'cancelled'].includes(st)) {
+      return res.status(400).json({ error: 'Invalid schedule status.' })
+    }
+    const r = await pool.query(
+      `UPDATE hr_schedules SET status = $1 WHERE id = $2 RETURNING id`,
+      [st, req.params.id]
+    )
+    if (!r.rows[0]) return res.status(404).json({ error: 'Schedule not found' })
+    await writeAudit(req, { action: 'update', entity: 'hr_schedule', entityId: r.rows[0].id, summary: `Shift marked ${st}` })
+    res.json({ ok: true, id: r.rows[0].id, status: st })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/schedules/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM hr_schedules WHERE id = $1 RETURNING id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Schedule not found' })
+    await writeAudit(req, { action: 'delete', entity: 'hr_schedule', entityId: r.rows[0].id, summary: 'Removed a shift' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/hr/payroll', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT p.id, p.employee_id, e.full_name, e.employee_code, e.department, e.salary_type,
+              to_char(p.period_start, 'YYYY-MM-DD') AS period_start,
+              to_char(p.period_end, 'YYYY-MM-DD') AS period_end,
+              p.base_salary, p.overtime_pay, p.bonuses, p.deductions, p.net_pay,
+              to_char(p.payment_date, 'YYYY-MM-DD') AS payment_date,
+              p.payment_method, p.status, p.notes
+       FROM hr_payroll p
+       JOIN hr_employees e ON e.id = p.employee_id
+       ORDER BY p.period_end DESC, p.id DESC`
+    )
+    res.json(r.rows.map((row) => ({
+      ...row,
+      base_salary: toMoney(row.base_salary),
+      overtime_pay: toMoney(row.overtime_pay),
+      bonuses: toMoney(row.bonuses),
+      deductions: toMoney(row.deductions),
+      net_pay: toMoney(row.net_pay),
+    })))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/payroll', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { employee_id, period_start, period_end, base_salary, overtime_pay, bonuses, deductions, payment_method, notes } = req.body || {}
+    if (!employee_id || !period_start || !period_end) {
+      return res.status(400).json({ error: 'Employee and pay period are required.' })
+    }
+    if (period_end < period_start) {
+      return res.status(400).json({ error: 'Period end must be on or after period start.' })
+    }
+    const emp = await pool.query('SELECT id, full_name, status FROM hr_employees WHERE id = $1', [employee_id])
+    if (!emp.rows[0]) return res.status(404).json({ error: 'Employee not found.' })
+    if (emp.rows[0].status === 'terminated') {
+      return res.status(400).json({ error: 'Cannot create payroll for a terminated employee.' })
+    }
+    const overlap = await pool.query(
+      `SELECT id FROM hr_payroll
+       WHERE employee_id = $1
+         AND period_start <= $3
+         AND period_end >= $2
+       LIMIT 1`,
+      [employee_id, period_start, period_end]
+    )
+    if (overlap.rows[0]) {
+      return res.status(400).json({ error: 'This employee already has payroll that overlaps that period.' })
+    }
+    const base = toMoney(base_salary)
+    const ot = toMoney(overtime_pay)
+    const bonus = toMoney(bonuses)
+    const ded = toMoney(deductions)
+    if (base < 0 || ot < 0 || bonus < 0 || ded < 0) {
+      return res.status(400).json({ error: 'Pay amounts cannot be negative.' })
+    }
+    const gross = base + ot + bonus
+    if (ded > gross) {
+      return res.status(400).json({ error: 'Deductions cannot be greater than base + overtime + bonuses.' })
+    }
+    const net = gross - ded
+    const method = ['bank_transfer', 'cash', 'check'].includes(payment_method) ? payment_method : 'bank_transfer'
+    const r = await pool.query(
+      `INSERT INTO hr_payroll (employee_id, period_start, period_end, base_salary, overtime_pay, bonuses, deductions, net_pay, payment_method, status, notes, payment_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', $10, NULL)
+       RETURNING id`,
+      [employee_id, period_start, period_end, base, ot, bonus, ded, net, method, notes || null]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_payroll', entityId: r.rows[0].id, summary: `Payroll draft for ${emp.rows[0].full_name} ($${net.toFixed(2)})` })
+    res.status(201).json({ id: r.rows[0].id, net_pay: net, status: 'draft' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/payroll/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const st = req.body?.status
+    const current = await pool.query('SELECT id, status FROM hr_payroll WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Payroll record not found' })
+    const from = current.rows[0].status
+    const allowed = { draft: ['approved'], approved: ['paid'] }
+    if (!allowed[from] || !allowed[from].includes(st)) {
+      return res.status(400).json({ error: `Cannot change payroll from ${from} to ${st}. Use draft → approved → paid.` })
+    }
+    const r = st === 'paid'
+      ? await pool.query(
+          `UPDATE hr_payroll SET status = 'paid', payment_date = CURRENT_DATE WHERE id = $1
+           RETURNING id, status, to_char(payment_date, 'YYYY-MM-DD') AS payment_date`,
+          [req.params.id]
+        )
+      : await pool.query(
+          `UPDATE hr_payroll SET status = $1 WHERE id = $2
+           RETURNING id, status, to_char(payment_date, 'YYYY-MM-DD') AS payment_date`,
+          [st, req.params.id]
+        )
+    await writeAudit(req, { action: 'update', entity: 'hr_payroll', entityId: r.rows[0].id, summary: `Payroll marked ${st}` })
+    res.json({ ok: true, status: r.rows[0].status, payment_date: r.rows[0].payment_date })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/payroll/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT id, status FROM hr_payroll WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Payroll record not found' })
+    if (current.rows[0].status === 'paid') {
+      return res.status(400).json({ error: 'Paid payroll cannot be deleted.' })
+    }
+    const r = await pool.query('DELETE FROM hr_payroll WHERE id = $1 RETURNING id', [req.params.id])
+    await writeAudit(req, { action: 'delete', entity: 'hr_payroll', entityId: r.rows[0].id, summary: 'Deleted payroll record' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/hr/leaves', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT l.id, l.employee_id, e.full_name, e.employee_code, e.department, l.leave_type,
+              to_char(l.start_date, 'YYYY-MM-DD') AS start_date,
+              to_char(l.end_date, 'YYYY-MM-DD') AS end_date,
+              l.days_count, l.reason, l.status
+       FROM hr_leaves l
+       JOIN hr_employees e ON e.id = l.employee_id
+       ORDER BY l.start_date DESC, l.id DESC`
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/leaves', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { employee_id, leave_type, start_date, end_date, reason } = req.body || {}
+    if (!employee_id || !start_date || !end_date) {
+      return res.status(400).json({ error: 'Employee, start date and end date are required.' })
+    }
+    const days = daysInclusive(start_date, end_date)
+    if (days < 1) return res.status(400).json({ error: 'End date must be on or after the start date.' })
+    const type = HR_LEAVE_TYPES.includes(leave_type) ? leave_type : 'vacation'
+    const r = await pool.query(
+      `INSERT INTO hr_leaves (employee_id, leave_type, start_date, end_date, days_count, reason, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING id`,
+      [employee_id, type, start_date, end_date, days, reason || null]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_leave', entityId: r.rows[0].id, summary: `Leave request ${type} (${days} days)` })
+    res.status(201).json({ id: r.rows[0].id, days_count: days })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/leaves/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const st = req.body?.status
+    if (!['pending', 'approved', 'rejected', 'cancelled'].includes(st)) {
+      return res.status(400).json({ error: 'Invalid leave status.' })
+    }
+    const r = await pool.query('UPDATE hr_leaves SET status = $1 WHERE id = $2 RETURNING id, employee_id', [st, req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    if (st === 'approved') {
+      await pool.query(`UPDATE hr_employees SET status = 'on_leave' WHERE id = $1 AND status = 'active'`, [r.rows[0].employee_id])
+    }
+    await writeAudit(req, { action: 'update', entity: 'hr_leave', entityId: r.rows[0].id, summary: `Leave marked ${st}` })
+    res.json({ ok: true, status: st })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/leaves/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM hr_leaves WHERE id = $1 RETURNING id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Leave not found' })
+    await writeAudit(req, { action: 'delete', entity: 'hr_leave', entityId: r.rows[0].id, summary: 'Deleted leave request' })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 pool.query('SELECT 1').then(async () => {
   await ensureFinanceTables()
+  await ensureHrTables()
   await ensureGuestTables()
   await ensureAuditTable()
   await ensureUserSecurity()

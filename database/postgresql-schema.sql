@@ -230,3 +230,61 @@ FROM (VALUES
   ('AC repair - Suite Room', 'Maintenance', 95.00, 1, 'cash')
 ) AS v(description, category, amount, days_ago, payment_method)
 WHERE NOT EXISTS (SELECT 1 FROM expenses LIMIT 1);
+
+-- HR
+CREATE TABLE IF NOT EXISTS hr_employees (
+    id SERIAL PRIMARY KEY,
+    employee_code VARCHAR(20) NOT NULL UNIQUE,
+    full_name VARCHAR(120) NOT NULL,
+    department VARCHAR(40) NOT NULL DEFAULT 'Other',
+    position VARCHAR(100) NOT NULL,
+    phone VARCHAR(30),
+    email VARCHAR(120),
+    hire_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    salary DECIMAL(12, 2) DEFAULT 0,
+    salary_type VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (salary_type IN ('hourly', 'monthly', 'annual')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'on_leave', 'terminated')),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hr_schedules (
+    id SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+    shift_date DATE NOT NULL,
+    shift_start TIME NOT NULL,
+    shift_end TIME NOT NULL,
+    shift_type VARCHAR(20) NOT NULL DEFAULT 'morning' CHECK (shift_type IN ('morning', 'afternoon', 'evening', 'night')),
+    status VARCHAR(20) NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'absent', 'cancelled')),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hr_payroll (
+    id SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE RESTRICT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    base_salary DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    overtime_pay DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    bonuses DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    deductions DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    net_pay DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    payment_date DATE,
+    payment_method VARCHAR(20) NOT NULL DEFAULT 'bank_transfer' CHECK (payment_method IN ('bank_transfer', 'cash', 'check')),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'paid')),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hr_leaves (
+    id SERIAL PRIMARY KEY,
+    employee_id INT NOT NULL REFERENCES hr_employees(id) ON DELETE CASCADE,
+    leave_type VARCHAR(20) NOT NULL DEFAULT 'vacation' CHECK (leave_type IN ('vacation', 'sick', 'personal', 'unpaid', 'other')),
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    days_count INT NOT NULL DEFAULT 1,
+    reason TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);

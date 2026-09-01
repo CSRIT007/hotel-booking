@@ -87,10 +87,10 @@
             <span>{{ openGroup === 'hr' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'hr'" class="admin-sub">
-            <router-link to="/admin/hr-employees" class="admin-sub-link">Employees</router-link>
-            <router-link to="/admin/hr-schedules" class="admin-sub-link">Schedules</router-link>
-            <router-link to="/admin/hr-payroll" class="admin-sub-link">Payroll</router-link>
-            <router-link to="/admin/hr-leaves" class="admin-sub-link">Leaves</router-link>
+            <router-link to="/admin/hr-employees" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-employees') }">Employees</router-link>
+            <router-link to="/admin/hr-schedules" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-schedules') }">Schedules</router-link>
+            <router-link to="/admin/hr-payroll" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-payroll') }">Payroll</router-link>
+            <router-link to="/admin/hr-leaves" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-leaves') }">Leaves</router-link>
           </div>
         </div>
 
