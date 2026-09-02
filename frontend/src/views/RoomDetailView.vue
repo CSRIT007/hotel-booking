@@ -39,7 +39,7 @@
             </ul>
           </div>
           <div class="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <p class="text-2xl font-semibold text-stone-800">${{ Number(room.price).toFixed(2) }} <span class="text-base font-normal text-stone-500">per night</span></p>
+            <p class="text-2xl font-semibold text-stone-800">{{ formatMoney(room.price) }} <span class="text-base font-normal text-stone-500">per night</span></p>
             <form v-if="isLoggedIn" class="mt-6 space-y-4" @submit.prevent="submitBooking">
               <div>
                 <label class="block text-sm font-medium text-stone-700">Check-in</label>
@@ -68,7 +68,7 @@
                   <option v-for="n in room.max_persons" :key="n" :value="n">{{ n }}</option>
                 </select>
               </div>
-              <p v-if="totalPrice" class="text-lg font-medium text-stone-800">Total: ${{ totalPrice.toFixed(2) }}</p>
+              <p v-if="totalPrice" class="text-lg font-medium text-stone-800">Total: {{ formatMoney(totalPrice) }}</p>
               <p v-if="bookingError" class="text-sm text-red-600">{{ bookingError }}</p>
               <p v-if="bookingSuccess" class="text-sm text-green-600">{{ bookingSuccess }}</p>
               <router-link
@@ -105,6 +105,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { getRoom, createBooking } from '../services/data'
+import { formatMoney } from '../utils/money'
 
 const route = useRoute()
 const { isLoggedIn, currentUser } = useAuth()

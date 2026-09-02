@@ -106,7 +106,7 @@
                   </div>
                 </td>
                 <td class="px-4 py-3 text-stone-600">{{ r.hotel_name || '—' }}</td>
-                <td class="px-4 py-3 text-right">${{ Number(r.price || 0).toFixed(2) }}</td>
+                <td class="px-4 py-3 text-right">{{ formatMoney(r.price) }}</td>
                 <td class="px-4 py-3">
                   <span
                     class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
@@ -147,6 +147,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { createRoom, deleteRoom, getHotels, getRooms, updateRoom } from '../../services/data'
 import { ROOM_IMAGES } from '../../constants/media'
 import ConfirmModal from '../../components/ConfirmModal.vue'
+import { formatMoney } from '../../utils/money'
 
 const hotels = ref([])
 const rooms = ref([])

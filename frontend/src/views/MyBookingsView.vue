@@ -42,7 +42,7 @@
               <li>Check-in: {{ b.check_in }}</li>
               <li>Check-out: {{ b.check_out }}</li>
               <li>Guests: {{ b.guests }}</li>
-              <li>Total: ${{ Number(b.total_price || 0).toFixed(2) }}</li>
+              <li>Total: {{ formatMoney(b.total_price) }}</li>
             </ul>
             <p v-if="b.status === 'pending'" class="mt-3 text-sm text-amber-700">
               Waiting for the hotel to confirm. We will update this page when it is ready.
@@ -70,6 +70,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { getMyBookings, getNotifications, markNotificationsRead } from '../services/data'
+import { formatMoney } from '../utils/money'
 import PageHero from '../components/PageHero.vue'
 
 const { currentUser } = useAuth()

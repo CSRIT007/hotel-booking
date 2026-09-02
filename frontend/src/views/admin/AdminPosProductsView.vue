@@ -22,7 +22,7 @@
               <td class="px-4 py-3">{{ p.id }}</td>
               <td class="px-4 py-3 font-medium text-stone-800">{{ p.name }}</td>
               <td class="px-4 py-3 text-stone-600">{{ p.category || '—' }}</td>
-              <td class="px-4 py-3 text-right">${{ Number(p.price || 0).toFixed(2) }}</td>
+              <td class="px-4 py-3 text-right">{{ formatMoney(p.price) }}</td>
               <td class="px-4 py-3 text-right">{{ p.stock ?? '—' }}</td>
               <td class="px-4 py-3">
                 <span
@@ -44,6 +44,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getPosProducts } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 
 const products = ref([])
 const loading = ref(true)

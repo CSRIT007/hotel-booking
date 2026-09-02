@@ -22,9 +22,7 @@ export function toMoney(n) {
   return Number.isFinite(v) ? v : 0
 }
 
-export function formatMoney(n) {
-  return `$${toMoney(n).toFixed(2)}`
-}
+export { formatMoney } from '../utils/money'
 
 export function monthKey(value) {
   if (!value) return 'Unknown'

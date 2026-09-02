@@ -23,7 +23,7 @@
               <td class="px-4 py-3">{{ b.username }} ({{ b.email }})</td>
               <td class="px-4 py-3">{{ b.room_name }} — {{ b.hotel_name }}</td>
               <td class="px-4 py-3">{{ b.check_in }} → {{ b.check_out }}</td>
-              <td class="px-4 py-3">${{ Number(b.total_price).toFixed(2) }}</td>
+              <td class="px-4 py-3">{{ formatMoney(b.total_price) }}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
@@ -69,6 +69,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { getBookings, updateBookingStatus } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 
 const route = useRoute()
 const bookings = ref([])

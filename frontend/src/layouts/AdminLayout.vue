@@ -12,7 +12,7 @@
         </button>
       </div>
       <nav class="flex-1 overflow-y-auto py-4 text-sm">
-        <router-link to="/admin" class="admin-nav" :class="{ 'admin-nav-active': isActive('/admin') && !isActive('/admin/', true) }">
+        <router-link :to="{ name: 'AdminDashboard' }" class="admin-nav" :class="{ 'admin-nav-active': isDashboard }">
           <span class="w-6 text-center">▣</span> Dashboard
         </router-link>
 
@@ -87,7 +87,8 @@
             <span>{{ openGroup === 'hr' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'hr'" class="admin-sub">
-            <router-link to="/admin/hr-employees" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-employees') }">Employees</router-link>
+            <router-link to="/admin/hr-employees" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-employees') }">Employee information</router-link>
+            <router-link to="/admin/hr-org" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-org') }">Departments</router-link>
             <router-link to="/admin/hr-schedules" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-schedules') }">Schedules</router-link>
             <router-link to="/admin/hr-payroll" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-payroll') }">Payroll</router-link>
             <router-link to="/admin/hr-leaves" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/hr-leaves') }">Leaves</router-link>
@@ -140,7 +141,7 @@
     <div class="flex flex-1 flex-col lg:ml-64">
       <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900">
         <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100 dark:hover:bg-stone-800" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
-        <h1 class="text-lg font-semibold text-stone-800">Admin</h1>
+        <h1 class="text-lg font-semibold text-stone-800">{{ route.meta.title || 'Admin' }}</h1>
         <div class="ml-auto flex items-center gap-3">
           <router-link
             v-if="pendingBookings > 0"
@@ -191,7 +192,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useStaffAlerts } from '../composables/useStaffAlerts'
@@ -203,12 +204,37 @@ const router = useRouter()
 const { logout: doLogout, currentUser } = useAuth()
 const { newMessages, pendingBookings, latestMessage, toast, refresh, dismissToast } = useStaffAlerts()
 const sidebarOpen = ref(true)
-const openGroup = ref('pms')
+const openGroup = ref('')
 const showLogoutConfirm = ref(false)
+const isDashboard = computed(() => route.name === 'AdminDashboard')
 
-function isActive(path, exactOnly) {
-  if (exactOnly) return route.path.startsWith(path) && route.path !== path
-  return route.path === path || (path !== '/admin' && route.path.startsWith(path))
+function isActive(path) {
+  return route.path === path || route.path.startsWith(`${path}/`)
+}
+
+function groupForPath(path) {
+  if (path === '/admin' || path === '/admin/') return ''
+  if (
+    path.startsWith('/admin/bookings') ||
+    path.startsWith('/admin/rooms') ||
+    path.startsWith('/admin/properties') ||
+    path.startsWith('/admin/guests') ||
+    path.startsWith('/admin/housekeeping')
+  ) return 'pms'
+  if (path.startsWith('/admin/pos')) return 'pos'
+  if (path.startsWith('/admin/crs')) return 'crs'
+  if (path.startsWith('/admin/crm')) return 'crm'
+  if (path.startsWith('/admin/finance')) return 'finance'
+  if (path.startsWith('/admin/hr')) return 'hr'
+  if (path.startsWith('/admin/maintenance')) return 'maintenance'
+  if (path.startsWith('/admin/reports') || path.startsWith('/admin/analytics')) return 'analytics'
+  if (
+    path.startsWith('/admin/audit-log') ||
+    path.startsWith('/admin/users') ||
+    path.startsWith('/admin/login-activity') ||
+    path.startsWith('/admin/security')
+  ) return 'admin'
+  return null
 }
 function toggle(group) {
   openGroup.value = openGroup.value === group ? '' : group
@@ -229,16 +255,8 @@ watch([newMessages, () => route.meta.title], () => {
 
 watch(() => route.path, (path) => {
   refresh()
-  if (path === '/admin' || path === '/admin/') openGroup.value = 'pms'
-  else if (path.startsWith('/admin/bookings') || path.startsWith('/admin/rooms') || path.startsWith('/admin/properties') || path.startsWith('/admin/guests') || path.startsWith('/admin/housekeeping')) openGroup.value = 'pms'
-  else if (path.startsWith('/admin/pos')) openGroup.value = 'pos'
-  else if (path.startsWith('/admin/crs')) openGroup.value = 'crs'
-  else if (path.startsWith('/admin/crm')) openGroup.value = 'crm'
-  else if (path.startsWith('/admin/finance')) openGroup.value = 'finance'
-  else if (path.startsWith('/admin/hr')) openGroup.value = 'hr'
-  else if (path.startsWith('/admin/maintenance')) openGroup.value = 'maintenance'
-  else if (path.startsWith('/admin/reports') || path.startsWith('/admin/analytics')) openGroup.value = 'analytics'
-  else if (path.startsWith('/admin/audit-log') || path.startsWith('/admin/users') || path.startsWith('/admin/login-activity') || path.startsWith('/admin/security')) openGroup.value = 'admin'
+  const group = groupForPath(path)
+  if (group !== null) openGroup.value = group
 }, { immediate: true })
 </script>
 

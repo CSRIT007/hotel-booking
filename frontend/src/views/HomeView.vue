@@ -76,7 +76,7 @@
               :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
             />
             <div class="flex flex-1 flex-col justify-center p-6">
-              <p class="text-sm font-medium text-brand-700">${{ Number(room.price).toFixed(0) }} <span class="font-normal text-stone-500">/ night</span></p>
+              <p class="text-sm font-medium text-brand-700">{{ formatMoney(room.price) }} <span class="font-normal text-stone-500">/ night</span></p>
               <h3 class="mt-1 font-display text-xl font-semibold text-stone-800">{{ room.name }}</h3>
               <p class="text-sm text-stone-500">{{ room.hotel_name }}</p>
               <p class="mt-2 text-sm text-stone-600">{{ room.max_persons }} guests · {{ room.size }} · {{ room.view_type }}</p>
@@ -115,6 +115,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getHotels, getRooms, getTestimonials } from '../services/data'
+import { formatMoney } from '../utils/money'
 
 const hotels = ref([])
 const rooms = ref([])

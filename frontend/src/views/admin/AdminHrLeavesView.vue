@@ -28,7 +28,7 @@
             <label class="block text-xs font-medium text-stone-700">Employee</label>
             <select v-model.number="form.employee_id" required class="field">
               <option disabled value="0">Select staff</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }}</option>
+              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }} — {{ e.department }} / {{ e.position }}</option>
             </select>
           </div>
           <div>
@@ -76,7 +76,8 @@
               <tr v-for="l in leaves" :key="l.id" class="hover:bg-stone-50">
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ l.full_name }}</p>
-                  <p class="text-xs text-stone-500">{{ l.reason || '—' }}</p>
+                  <p class="text-xs text-stone-500">{{ l.department }} · {{ l.position }}</p>
+                  <p v-if="l.reason" class="text-xs text-stone-400">{{ l.reason }}</p>
                 </td>
                 <td class="px-4 py-3 capitalize">{{ l.leave_type }}</td>
                 <td class="px-4 py-3 text-stone-600">{{ l.start_date }} → {{ l.end_date }}</td>

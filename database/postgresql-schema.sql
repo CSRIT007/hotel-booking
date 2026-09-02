@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     summary TEXT NOT NULL,
     details JSONB,
     ip_address VARCHAR(45),
+    user_agent VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
