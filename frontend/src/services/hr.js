@@ -1,14 +1,7 @@
-export const HR_DEPARTMENTS = [
-  'Front desk',
-  'Housekeeping',
-  'Food & Beverage',
-  'Maintenance',
-  'Management',
-  'Sales',
-  'Accounting',
-  'Security',
-  'Other',
-]
+export function positionsForDepartment(org, departmentName) {
+  const dept = (org || []).find((d) => d.name === departmentName)
+  return dept?.positions || []
+}
 
 export const HR_SHIFT_TYPES = ['morning', 'afternoon', 'evening', 'night']
 export const HR_LEAVE_TYPES = ['vacation', 'sick', 'personal', 'unpaid', 'other']
@@ -19,10 +12,7 @@ export const HR_PAY_METHODS = [
   { value: 'check', label: 'Check' },
 ]
 
-export function formatMoney(n) {
-  const v = Number(n)
-  return `$${(Number.isFinite(v) ? v : 0).toFixed(2)}`
-}
+export { formatMoney } from '../utils/money'
 
 export function todayKey() {
   const d = new Date()

@@ -29,7 +29,7 @@
             <label class="block text-xs font-medium text-stone-700">Employee</label>
             <select v-model.number="form.employee_id" required class="field">
               <option disabled value="0">Select staff</option>
-              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }} — {{ e.department }}</option>
+              <option v-for="e in employees" :key="e.id" :value="e.id">{{ e.full_name }} — {{ e.department }} / {{ e.position }}</option>
             </select>
           </div>
           <div>
@@ -77,7 +77,7 @@
                 <td class="whitespace-nowrap px-4 py-3 text-stone-600">{{ s.shift_date }}</td>
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ s.full_name }}</p>
-                  <p class="text-xs text-stone-500">{{ s.department }}</p>
+                  <p class="text-xs text-stone-500">{{ s.department }} · {{ s.position }}</p>
                 </td>
                 <td class="whitespace-nowrap px-4 py-3">{{ s.shift_start }} – {{ s.shift_end }}</td>
                 <td class="px-4 py-3 capitalize">{{ s.shift_type }}</td>

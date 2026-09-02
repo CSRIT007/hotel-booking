@@ -28,7 +28,7 @@
         <div class="mt-4 space-y-3">
           <div class="flex justify-between text-sm">
             <span class="text-stone-600">Confirmed + completed bookings</span>
-            <span class="font-semibold text-green-600">${{ totalRevenue.toFixed(2) }}</span>
+            <span class="font-semibold text-green-600">{{ formatMoney(totalRevenue) }}</span>
           </div>
           <div class="flex justify-between text-sm">
             <span class="text-stone-600">Total bookings</span>
@@ -60,7 +60,7 @@
               <td class="px-4 py-3">{{ b.room_name || '—' }}</td>
               <td class="px-4 py-3">{{ b.check_in }}</td>
               <td class="px-4 py-3">{{ b.check_out }}</td>
-              <td class="px-4 py-3 text-right">${{ Number(b.total_price || 0).toFixed(2) }}</td>
+              <td class="px-4 py-3 text-right">{{ formatMoney(b.total_price) }}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
@@ -84,6 +84,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getBookings } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 
 const bookings = ref([])
 const loading = ref(true)

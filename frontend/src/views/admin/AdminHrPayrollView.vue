@@ -28,7 +28,7 @@
             <label class="block text-xs font-medium text-stone-700">Employee</label>
             <select v-model.number="form.employee_id" required class="field">
               <option disabled value="0">Select staff</option>
-              <option v-for="e in payableEmployees" :key="e.id" :value="e.id">{{ e.full_name }} ({{ e.salary_type }})</option>
+              <option v-for="e in payableEmployees" :key="e.id" :value="e.id">{{ e.full_name }} — {{ e.department }} / {{ e.position }}</option>
             </select>
           </div>
           <div class="grid grid-cols-2 gap-3">
@@ -100,7 +100,7 @@
               <tr v-for="p in payroll" :key="p.id" class="hover:bg-stone-50">
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ p.full_name }}</p>
-                  <p class="text-xs text-stone-500">{{ p.employee_code }} · {{ p.payment_method.replace('_', ' ') }}</p>
+                  <p class="text-xs text-stone-500">{{ p.department }} · {{ p.position }} · {{ p.employee_code }}</p>
                 </td>
                 <td class="px-4 py-3 text-stone-600">
                   {{ p.period_start }} → {{ p.period_end }}

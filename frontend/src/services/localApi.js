@@ -241,6 +241,65 @@ export async function getAuditLogs(params = {}) {
   return Array.isArray(data) ? data : []
 }
 
+export async function getHrOrg() {
+  const { data } = await client.get('/api/hr/org')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createHrDepartment(payload) {
+  try {
+    const { data } = await client.post('/api/hr/departments', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add department')
+  }
+}
+
+export async function updateHrDepartment(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/departments/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update department')
+  }
+}
+
+export async function deleteHrDepartment(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/departments/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove department')
+  }
+}
+
+export async function createHrPosition(departmentId, payload) {
+  try {
+    const { data } = await client.post(`/api/hr/departments/${departmentId}/positions`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add position')
+  }
+}
+
+export async function updateHrPosition(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/hr/positions/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update position')
+  }
+}
+
+export async function deleteHrPosition(id) {
+  try {
+    const { data } = await client.delete(`/api/hr/positions/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove position')
+  }
+}
+
 export async function getHrEmployees() {
   const { data } = await client.get('/api/hr/employees')
   return Array.isArray(data) ? data : []

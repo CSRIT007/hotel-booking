@@ -1,11 +1,11 @@
 <template>
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Audit log</h1>
-    <p class="mt-1 text-stone-600">Who did what, and when. Logins, bookings, properties, rooms, messages, POS, and expenses.</p>
+    <p class="mt-1 text-stone-600">Who did what, from which IP and device. Logins, bookings, properties, rooms, messages, POS, and expenses.</p>
 
     <div class="mt-6 flex flex-wrap gap-3">
       <select v-model="entity" class="rounded-md border border-stone-300 px-3 py-2 text-sm" @change="load">
-        <option value="">All areas</option>
+        <option value="">All types</option>
         <option value="user">Accounts</option>
         <option value="booking">Bookings</option>
         <option value="property">Properties</option>
@@ -35,7 +35,7 @@
               <th class="px-4 py-3 text-left font-medium text-stone-700">When</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Who</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Action</th>
-              <th class="px-4 py-3 text-left font-medium text-stone-700">Area</th>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">IP address</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">What happened</th>
             </tr>
           </thead>
@@ -52,7 +52,10 @@
                   :class="actionClass(row.action)"
                 >{{ row.action.replace('_', ' ') }}</span>
               </td>
-              <td class="px-4 py-3 capitalize text-stone-600">{{ row.entity }}</td>
+              <td class="px-4 py-3">
+                <p class="font-mono text-xs text-stone-800">{{ formatIp(row.ip_address) }}</p>
+                <p class="mt-0.5 text-xs text-stone-500">{{ row.device || 'Unknown device' }}</p>
+              </td>
               <td class="px-4 py-3 text-stone-800">{{ row.summary }}</td>
             </tr>
           </tbody>
@@ -77,6 +80,14 @@ function formatWhen(val) {
   if (!val) return ''
   const d = new Date(val)
   return Number.isNaN(d.getTime()) ? val : d.toLocaleString()
+}
+
+function formatIp(ip) {
+  if (!ip) return '—'
+  let value = String(ip)
+  if (value.startsWith('::ffff:')) value = value.slice(7)
+  if (value === '::1') value = '127.0.0.1'
+  return value
 }
 
 function actionClass(value) {

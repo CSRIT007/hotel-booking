@@ -31,7 +31,8 @@
           <li>Account locks after {{ summary?.login_fail_limit || 5 }} failed sign-ins for {{ summary?.lockout_minutes || 15 }} minutes.</li>
           <li>Disabled accounts cannot sign in.</li>
           <li>Staff cannot disable or demote the last remaining admin.</li>
-          <li>Sign-ins, failed logins, and user changes are written to the audit log.</li>
+          <li>Each login and staff action is recorded with IP address and device.</li>
+          <li>Signed-in sessions end after 5 minutes with no mouse, keyboard, or touch activity.</li>
           <li>User management APIs require a staff session.</li>
         </ul>
         <div class="mt-4 flex flex-wrap gap-3 text-sm">

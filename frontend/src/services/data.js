@@ -460,6 +460,40 @@ function requireLocal(fn, fallback) {
   })
 }
 
+export async function getHrOrg() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getHrOrg()
+  } catch (e) {
+    console.warn('Local API getHrOrg failed:', e.message)
+    return []
+  }
+}
+
+export async function createHrDepartment(payload) {
+  return requireLocal(() => localApi.createHrDepartment(payload), 'Failed to add department')
+}
+
+export async function updateHrDepartment(id, payload) {
+  return requireLocal(() => localApi.updateHrDepartment(id, payload), 'Failed to update department')
+}
+
+export async function deleteHrDepartment(id) {
+  return requireLocal(() => localApi.deleteHrDepartment(id), 'Failed to remove department')
+}
+
+export async function createHrPosition(departmentId, payload) {
+  return requireLocal(() => localApi.createHrPosition(departmentId, payload), 'Failed to add position')
+}
+
+export async function updateHrPosition(id, payload) {
+  return requireLocal(() => localApi.updateHrPosition(id, payload), 'Failed to update position')
+}
+
+export async function deleteHrPosition(id) {
+  return requireLocal(() => localApi.deleteHrPosition(id), 'Failed to remove position')
+}
+
 export async function getHrEmployees() {
   if (!hasLocalApi) return []
   try {

@@ -33,7 +33,7 @@
               </td>
               <td class="px-4 py-3 text-stone-600">{{ t.category || '—' }}</td>
               <td class="px-4 py-3 text-right">{{ t.quantity ?? 1 }}</td>
-              <td class="px-4 py-3 text-right">${{ Number(t.total_amount || 0).toFixed(2) }}</td>
+              <td class="px-4 py-3 text-right">{{ formatMoney(t.total_amount) }}</td>
               <td class="px-4 py-3 text-stone-700 capitalize">{{ (t.payment_method || 'other').replace('_', ' ') }}</td>
               <td class="px-4 py-3">
                 <span
@@ -59,6 +59,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getPosTransactions } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 
 const transactions = ref([])
 const loading = ref(true)

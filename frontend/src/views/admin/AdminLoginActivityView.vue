@@ -10,6 +10,7 @@
             <tr>
               <th class="px-4 py-3 text-left font-medium text-stone-700">When</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Who</th>
+              <th class="px-4 py-3 text-left font-medium text-stone-700">IP address</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Result</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Detail</th>
             </tr>
@@ -18,6 +19,10 @@
             <tr v-for="row in logs" :key="row.id" class="hover:bg-stone-50">
               <td class="whitespace-nowrap px-4 py-3 text-stone-500">{{ formatWhen(row.created_at) }}</td>
               <td class="px-4 py-3 font-medium text-stone-800">{{ row.actor_name }}</td>
+              <td class="px-4 py-3">
+                <p class="font-mono text-xs text-stone-800">{{ formatIp(row.ip_address) }}</p>
+                <p class="mt-0.5 text-xs text-stone-500">{{ row.device || 'Unknown device' }}</p>
+              </td>
               <td class="px-4 py-3">
                 <span
                   class="rounded-full px-2 py-0.5 text-xs font-medium"
@@ -49,6 +54,14 @@ function formatWhen(val) {
   if (!val) return ''
   const d = new Date(val)
   return Number.isNaN(d.getTime()) ? val : d.toLocaleString()
+}
+
+function formatIp(ip) {
+  if (!ip) return '—'
+  let value = String(ip)
+  if (value.startsWith('::ffff:')) value = value.slice(7)
+  if (value === '::1') value = '127.0.0.1'
+  return value
 }
 
 onMounted(async () => {

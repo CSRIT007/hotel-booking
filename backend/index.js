@@ -33,6 +33,7 @@ const pool = new pg.Pool({
 })
 
 const app = express()
+app.set('trust proxy', true)
 app.use(express.json())
 app.use((_req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*')
@@ -48,13 +49,62 @@ function ensureImagePath(path) {
   return path.startsWith('/') ? path : `/${path}`
 }
 
+function normalizeIp(value) {
+  if (!value) return null
+  let ip = String(value).trim()
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7)
+  if (ip === '::1') ip = '127.0.0.1'
+  return ip.slice(0, 45) || null
+}
+
+function clientIp(req) {
+  const forwarded = req.headers['x-forwarded-for']
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return normalizeIp(forwarded.split(',')[0])
+  }
+  const real = req.headers['x-real-ip']
+  if (typeof real === 'string' && real.trim()) return normalizeIp(real)
+  return normalizeIp(req.ip || req.socket?.remoteAddress)
+}
+
+function clientUserAgent(req) {
+  return String(req.get('user-agent') || '').slice(0, 255) || null
+}
+
+function describeDevice(ua) {
+  if (!ua) return 'Unknown device'
+  const text = String(ua)
+  const browser = /Edg\//.test(text)
+    ? 'Edge'
+    : /OPR\/|Opera/.test(text)
+      ? 'Opera'
+      : /Chrome\//.test(text)
+        ? 'Chrome'
+        : /Firefox\//.test(text)
+          ? 'Firefox'
+          : /Safari\//.test(text)
+            ? 'Safari'
+            : 'Browser'
+  const os = /Windows NT/.test(text)
+    ? 'Windows'
+    : /Mac OS X|Macintosh/.test(text)
+      ? 'macOS'
+      : /Android/.test(text)
+        ? 'Android'
+        : /iPhone|iPad|iPod/.test(text)
+          ? 'iOS'
+          : /Linux/.test(text)
+            ? 'Linux'
+            : 'Unknown OS'
+  const kind = /Mobile|Android|iPhone|iPad|iPod/.test(text) ? 'phone/tablet' : 'computer'
+  return `${browser} on ${os} · ${kind}`
+}
+
 function actorFromReq(req, fallback = {}) {
   const id = parseInt(req.get('x-user-id') || fallback.id || 0, 10) || null
   const name = String(req.get('x-user-name') || fallback.name || 'Guest').slice(0, 100)
   const role = String(req.get('x-user-role') || fallback.role || 'guest').slice(0, 20)
-  const forwarded = req.headers['x-forwarded-for']
-  const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.socket?.remoteAddress || null
-  return { id, name, role, ip }
+  return { id, name, role, ip: clientIp(req), userAgent: clientUserAgent(req) }
 }
 
 function requireStaff(req, res) {
@@ -75,11 +125,23 @@ function isPasswordStrong(password) {
 
 async function writeAudit(req, { action, entity, entityId = null, summary, details = null, actor = null }) {
   try {
-    const a = actor || actorFromReq(req)
+    const fromReq = actorFromReq(req)
+    const a = actor || fromReq
     await pool.query(
-      `INSERT INTO audit_logs (actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [a.id, a.name, a.role, action, entity, entityId, summary, details ? JSON.stringify(details) : null, a.ip]
+      `INSERT INTO audit_logs (actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        a.id ?? fromReq.id,
+        a.name || fromReq.name,
+        a.role || fromReq.role,
+        action,
+        entity,
+        entityId,
+        summary,
+        details ? JSON.stringify(details) : null,
+        a.ip || fromReq.ip,
+        a.userAgent || fromReq.userAgent,
+      ]
     )
   } catch (e) {
     console.warn('Audit log skipped:', e.message)
@@ -932,7 +994,7 @@ app.post('/api/pos-transactions', async (req, res) => {
       action: 'create',
       entity: 'pos',
       entityId: sale.id,
-      summary: `POS sale ${sale.product_name} × ${sale.quantity} ($${Number(sale.total_amount).toFixed(2)})`,
+      summary: `POS sale ${sale.product_name} × ${sale.quantity} (${formatMoney(sale.total_amount)})`,
     })
     res.status(201).json(sale)
   } catch (e) {
@@ -973,6 +1035,12 @@ async function ensureFinanceTables() {
 function toMoney(n) {
   const v = Number(n)
   return Number.isFinite(v) ? v : 0
+}
+
+function formatMoney(n) {
+  const amount = toMoney(n)
+  const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return amount < 0 ? `($${abs})` : `$${abs}`
 }
 
 function payrollExpenseMethod(method) {
@@ -1085,7 +1153,7 @@ app.post('/api/expenses', async (req, res) => {
       action: 'create',
       entity: 'expense',
       entityId: saved.id,
-      summary: `Recorded expense “${saved.description}” ($${Number(saved.amount).toFixed(2)})`,
+      summary: `Recorded expense “${saved.description}” (${formatMoney(saved.amount)})`,
     })
     res.status(201).json(saved)
   } catch (e) {
@@ -1184,11 +1252,14 @@ async function ensureAuditTable() {
       summary TEXT NOT NULL,
       details JSONB,
       ip_address VARCHAR(45),
+      user_agent VARCHAR(255),
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `)
+  await pool.query('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255)')
   await pool.query('CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC)')
   await pool.query('CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_audit_ip ON audit_logs(ip_address)')
 }
 
 app.get('/api/audit-logs', async (req, res) => {
@@ -1209,14 +1280,18 @@ app.get('/api/audit-logs', async (req, res) => {
     }
     const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : ''
     const r = await pool.query(
-      `SELECT id, actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address, created_at
+      `SELECT id, actor_id, actor_name, actor_role, action, entity, entity_id, summary, details, ip_address, user_agent, created_at
        FROM audit_logs
        ${where}
        ORDER BY created_at DESC
        LIMIT 300`,
       params
     )
-    res.json(r.rows)
+    res.json(r.rows.map((row) => ({
+      ...row,
+      ip_address: normalizeIp(row.ip_address),
+      device: describeDevice(row.user_agent),
+    })))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1250,9 +1325,14 @@ app.patch('/api/notifications/read', async (req, res) => {
   }
 })
 
-const HR_DEPARTMENTS = ['Front desk', 'Housekeeping', 'Food & Beverage', 'Maintenance', 'Management', 'Sales', 'Accounting', 'Security', 'Other']
 const HR_SHIFT_TYPES = ['morning', 'afternoon', 'evening', 'night']
 const HR_LEAVE_TYPES = ['vacation', 'sick', 'personal', 'unpaid', 'other']
+const DEFAULT_HR_ORG = [
+  { name: 'Human Resource', positions: ['Head Department', 'Deputy Department', 'Senior', 'Staff'] },
+  { name: 'Operation', positions: ['Head Department', 'Deputy Department', 'Front desk', 'Housekeeping', 'Waiter', 'Maintenance'] },
+  { name: 'Finance', positions: ['Head Department', 'Deputy Department', 'Senior Accountant', 'Accountant'] },
+  { name: 'Information Technology', positions: ['Head Department', 'Administrator', 'Developer', 'IT support'] },
+]
 
 function daysInclusive(start, end) {
   const a = new Date(start)
@@ -1261,13 +1341,75 @@ function daysInclusive(start, end) {
   return Math.round((b - a) / 86400000) + 1
 }
 
+async function seedHrOrg() {
+  const existing = await pool.query('SELECT COUNT(*) AS n FROM hr_departments')
+  if (Number(existing.rows[0].n) > 0) return
+  for (let i = 0; i < DEFAULT_HR_ORG.length; i++) {
+    const dept = DEFAULT_HR_ORG[i]
+    const ins = await pool.query(
+      'INSERT INTO hr_departments (name, sort_order) VALUES ($1, $2) RETURNING id',
+      [dept.name, i + 1]
+    )
+    for (let j = 0; j < dept.positions.length; j++) {
+      await pool.query(
+        'INSERT INTO hr_positions (department_id, name, sort_order) VALUES ($1, $2, $3)',
+        [ins.rows[0].id, dept.positions[j], j + 1]
+      )
+    }
+  }
+}
+
+async function remapLegacyEmployeeOrg() {
+  const names = new Set((await pool.query('SELECT name FROM hr_departments')).rows.map((r) => r.name))
+  const map = [
+    ['Front desk', 'Operation', 'Front desk'],
+    ['Housekeeping', 'Operation', 'Housekeeping'],
+    ['Food & Beverage', 'Operation', 'Waiter'],
+    ['Maintenance', 'Operation', 'Maintenance'],
+    ['Management', 'Human Resource', 'Head Department'],
+    ['Sales', 'Operation', 'Front desk'],
+    ['Accounting', 'Finance', 'Accountant'],
+    ['Security', 'Operation', 'Front desk'],
+    ['Other', 'Human Resource', 'Staff'],
+  ]
+  for (const [from, dept, pos] of map) {
+    if (names.has(from)) continue
+    await pool.query('UPDATE hr_employees SET department = $1, position = $2 WHERE department = $3', [dept, pos, from])
+  }
+}
+
+async function getOrgTree() {
+  const depts = await pool.query('SELECT id, name, sort_order FROM hr_departments ORDER BY sort_order, id')
+  const positions = await pool.query(
+    'SELECT id, department_id, name, sort_order FROM hr_positions ORDER BY sort_order, id'
+  )
+  return depts.rows.map((d) => ({
+    ...d,
+    positions: positions.rows.filter((p) => p.department_id === d.id),
+  }))
+}
+
+async function resolveDeptPosition(department, position) {
+  const deptName = String(department || '').trim()
+  const posName = String(position || '').trim()
+  if (!deptName || !posName) return { error: 'Department and position are required.' }
+  const dept = await pool.query('SELECT id, name FROM hr_departments WHERE name = $1', [deptName])
+  if (!dept.rows[0]) return { error: 'Select a valid department.' }
+  const pos = await pool.query(
+    'SELECT id, name FROM hr_positions WHERE department_id = $1 AND name = $2',
+    [dept.rows[0].id, posName]
+  )
+  if (!pos.rows[0]) return { error: 'Select a valid position for that department.' }
+  return { department: dept.rows[0].name, position: pos.rows[0].name }
+}
+
 async function ensureHrTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hr_employees (
       id SERIAL PRIMARY KEY,
       employee_code VARCHAR(20) NOT NULL UNIQUE,
       full_name VARCHAR(120) NOT NULL,
-      department VARCHAR(40) NOT NULL DEFAULT 'Other',
+      department VARCHAR(80) NOT NULL DEFAULT 'Operation',
       position VARCHAR(100) NOT NULL,
       phone VARCHAR(30),
       email VARCHAR(120),
@@ -1279,6 +1421,26 @@ async function ensureHrTables() {
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `)
+  await pool.query(`ALTER TABLE hr_employees ALTER COLUMN department TYPE VARCHAR(80)`)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_departments (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(80) NOT NULL UNIQUE,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hr_positions (
+      id SERIAL PRIMARY KEY,
+      department_id INT NOT NULL REFERENCES hr_departments(id) ON DELETE CASCADE,
+      name VARCHAR(80) NOT NULL,
+      sort_order INT NOT NULL DEFAULT 0,
+      UNIQUE (department_id, name)
+    )
+  `)
+  await seedHrOrg()
+  await remapLegacyEmployeeOrg()
   await pool.query(`
     CREATE TABLE IF NOT EXISTS hr_schedules (
       id SERIAL PRIMARY KEY,
@@ -1334,11 +1496,11 @@ async function ensureHrTables() {
   const ins = await pool.query(
     `INSERT INTO hr_employees (employee_code, full_name, department, position, phone, email, hire_date, salary, salary_type, status)
      VALUES
-       ('EMP-001', 'Sokha Chan', 'Front desk', 'Receptionist', '012 111 222', 'sokha@smilehotel.local', CURRENT_DATE - 420, 450, 'monthly', 'active'),
-       ('EMP-002', 'Dara Kim', 'Housekeeping', 'Housekeeping supervisor', '012 333 444', 'dara@smilehotel.local', CURRENT_DATE - 300, 520, 'monthly', 'active'),
-       ('EMP-003', 'Maly Chea', 'Food & Beverage', 'Restaurant captain', '012 555 666', 'maly@smilehotel.local', CURRENT_DATE - 210, 480, 'monthly', 'active'),
-       ('EMP-004', 'Vannak Ly', 'Maintenance', 'Technician', '012 777 888', 'vannak@smilehotel.local', CURRENT_DATE - 150, 500, 'monthly', 'active'),
-       ('EMP-005', 'Sreymom Hun', 'Management', 'Duty manager', '012 999 000', 'sreymom@smilehotel.local', CURRENT_DATE - 600, 850, 'monthly', 'active')
+       ('EMP-001', 'Sokha Chan', 'Operation', 'Front desk', '012 111 222', 'sokha@smilehotel.local', CURRENT_DATE - 420, 450, 'monthly', 'active'),
+       ('EMP-002', 'Dara Kim', 'Operation', 'Housekeeping', '012 333 444', 'dara@smilehotel.local', CURRENT_DATE - 300, 520, 'monthly', 'active'),
+       ('EMP-003', 'Maly Chea', 'Operation', 'Waiter', '012 555 666', 'maly@smilehotel.local', CURRENT_DATE - 210, 480, 'monthly', 'active'),
+       ('EMP-004', 'Vannak Ly', 'Operation', 'Maintenance', '012 777 888', 'vannak@smilehotel.local', CURRENT_DATE - 150, 500, 'monthly', 'active'),
+       ('EMP-005', 'Sreymom Hun', 'Human Resource', 'Head Department', '012 999 000', 'sreymom@smilehotel.local', CURRENT_DATE - 600, 850, 'monthly', 'active')
      RETURNING id`
   )
   const ids = ins.rows.map((r) => r.id)
@@ -1389,6 +1551,146 @@ async function seedHrRelatedIfEmpty() {
 const EMPLOYEE_SELECT = `id, employee_code, full_name, department, position, phone, email,
   to_char(hire_date, 'YYYY-MM-DD') AS hire_date, salary, salary_type, status, notes, created_at`
 
+app.get('/api/hr/org', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    res.json(await getOrgTree())
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/departments', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const name = String(req.body?.name || '').trim()
+    if (!name) return res.status(400).json({ error: 'Department name is required.' })
+    const max = await pool.query('SELECT COALESCE(MAX(sort_order), 0) AS n FROM hr_departments')
+    const r = await pool.query(
+      'INSERT INTO hr_departments (name, sort_order) VALUES ($1, $2) RETURNING id, name, sort_order',
+      [name, Number(max.rows[0].n) + 1]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_department', entityId: r.rows[0].id, summary: `Added department ${name}` })
+    res.status(201).json({ ...r.rows[0], positions: [] })
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That department already exists.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/departments/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const name = String(req.body?.name || '').trim()
+    if (!name) return res.status(400).json({ error: 'Department name is required.' })
+    const current = await pool.query('SELECT id, name FROM hr_departments WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Department not found.' })
+    const r = await pool.query(
+      'UPDATE hr_departments SET name = $1 WHERE id = $2 RETURNING id, name, sort_order',
+      [name, req.params.id]
+    )
+    await pool.query('UPDATE hr_employees SET department = $1 WHERE department = $2', [name, current.rows[0].name])
+    await writeAudit(req, { action: 'update', entity: 'hr_department', entityId: r.rows[0].id, summary: `Renamed department to ${name}` })
+    res.json(r.rows[0])
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That department already exists.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/departments/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT id, name FROM hr_departments WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Department not found.' })
+    const used = await pool.query('SELECT 1 FROM hr_employees WHERE department = $1 LIMIT 1', [current.rows[0].name])
+    if (used.rows.length) {
+      return res.status(400).json({ error: 'Cannot delete a department that still has employees. Reassign them first.' })
+    }
+    await pool.query('DELETE FROM hr_departments WHERE id = $1', [req.params.id])
+    await writeAudit(req, { action: 'delete', entity: 'hr_department', entityId: current.rows[0].id, summary: `Removed department ${current.rows[0].name}` })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/hr/departments/:id/positions', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const name = String(req.body?.name || '').trim()
+    if (!name) return res.status(400).json({ error: 'Position name is required.' })
+    const dept = await pool.query('SELECT id, name FROM hr_departments WHERE id = $1', [req.params.id])
+    if (!dept.rows[0]) return res.status(404).json({ error: 'Department not found.' })
+    const max = await pool.query(
+      'SELECT COALESCE(MAX(sort_order), 0) AS n FROM hr_positions WHERE department_id = $1',
+      [req.params.id]
+    )
+    const r = await pool.query(
+      'INSERT INTO hr_positions (department_id, name, sort_order) VALUES ($1, $2, $3) RETURNING id, department_id, name, sort_order',
+      [req.params.id, name, Number(max.rows[0].n) + 1]
+    )
+    await writeAudit(req, { action: 'create', entity: 'hr_position', entityId: r.rows[0].id, summary: `Added position ${name} in ${dept.rows[0].name}` })
+    res.status(201).json(r.rows[0])
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That position already exists in this department.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/hr/positions/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const name = String(req.body?.name || '').trim()
+    if (!name) return res.status(400).json({ error: 'Position name is required.' })
+    const current = await pool.query(
+      `SELECT p.id, p.name, p.department_id, d.name AS department
+       FROM hr_positions p JOIN hr_departments d ON d.id = p.department_id
+       WHERE p.id = $1`,
+      [req.params.id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'Position not found.' })
+    const r = await pool.query(
+      'UPDATE hr_positions SET name = $1 WHERE id = $2 RETURNING id, department_id, name, sort_order',
+      [name, req.params.id]
+    )
+    await pool.query(
+      'UPDATE hr_employees SET position = $1 WHERE department = $2 AND position = $3',
+      [name, current.rows[0].department, current.rows[0].name]
+    )
+    await writeAudit(req, { action: 'update', entity: 'hr_position', entityId: r.rows[0].id, summary: `Renamed position to ${name}` })
+    res.json(r.rows[0])
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That position already exists in this department.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/hr/positions/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(
+      `SELECT p.id, p.name, d.name AS department
+       FROM hr_positions p JOIN hr_departments d ON d.id = p.department_id
+       WHERE p.id = $1`,
+      [req.params.id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'Position not found.' })
+    const used = await pool.query(
+      'SELECT 1 FROM hr_employees WHERE department = $1 AND position = $2 LIMIT 1',
+      [current.rows[0].department, current.rows[0].name]
+    )
+    if (used.rows.length) {
+      return res.status(400).json({ error: 'Cannot delete a position that still has employees. Reassign them first.' })
+    }
+    await pool.query('DELETE FROM hr_positions WHERE id = $1', [req.params.id])
+    await writeAudit(req, { action: 'delete', entity: 'hr_position', entityId: current.rows[0].id, summary: `Removed position ${current.rows[0].name}` })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/hr/employees', async (req, res) => {
   if (!requireStaff(req, res)) return
   try {
@@ -1404,9 +1706,9 @@ app.post('/api/hr/employees', async (req, res) => {
   try {
     const { full_name, department, position, phone, email, hire_date, salary, salary_type, status, notes } = req.body || {}
     const name = String(full_name || '').trim()
-    const job = String(position || '').trim()
-    if (!name || !job) return res.status(400).json({ error: 'Name and position are required.' })
-    const dept = HR_DEPARTMENTS.includes(department) ? department : 'Other'
+    if (!name) return res.status(400).json({ error: 'Name is required.' })
+    const resolved = await resolveDeptPosition(department, position)
+    if (resolved.error) return res.status(400).json({ error: resolved.error })
     const type = ['hourly', 'monthly', 'annual'].includes(salary_type) ? salary_type : 'monthly'
     const st = ['active', 'on_leave', 'terminated'].includes(status) ? status : 'active'
     const count = await pool.query('SELECT COUNT(*) AS n FROM hr_employees')
@@ -1415,7 +1717,7 @@ app.post('/api/hr/employees', async (req, res) => {
       `INSERT INTO hr_employees (employee_code, full_name, department, position, phone, email, hire_date, salary, salary_type, status, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING ${EMPLOYEE_SELECT}`,
-      [code, name, dept, job, phone || null, email || null, hire_date || new Date().toISOString().slice(0, 10), toMoney(salary), type, st, notes || null]
+      [code, name, resolved.department, resolved.position, phone || null, email || null, hire_date || new Date().toISOString().slice(0, 10), toMoney(salary), type, st, notes || null]
     )
     await writeAudit(req, { action: 'create', entity: 'hr_employee', entityId: r.rows[0].id, summary: `Added employee ${name} (${code})` })
     res.status(201).json(r.rows[0])
@@ -1430,9 +1732,17 @@ app.patch('/api/hr/employees/:id', async (req, res) => {
     const current = await pool.query(`SELECT ${EMPLOYEE_SELECT} FROM hr_employees WHERE id = $1`, [req.params.id])
     if (!current.rows[0]) return res.status(404).json({ error: 'Employee not found' })
     const row = current.rows[0]
+    let department = row.department
+    let position = row.position
+    if (req.body?.department != null || req.body?.position != null) {
+      const resolved = await resolveDeptPosition(req.body?.department ?? row.department, req.body?.position ?? row.position)
+      if (resolved.error) return res.status(400).json({ error: resolved.error })
+      department = resolved.department
+      position = resolved.position
+    }
     const next = {
-      department: HR_DEPARTMENTS.includes(req.body?.department) ? req.body.department : row.department,
-      position: String(req.body?.position || row.position).trim(),
+      department,
+      position,
       phone: req.body?.phone != null ? req.body.phone : row.phone,
       status: ['active', 'on_leave', 'terminated'].includes(req.body?.status) ? req.body.status : row.status,
       salary: req.body?.salary != null ? toMoney(req.body.salary) : toMoney(row.salary),
@@ -1466,7 +1776,7 @@ app.get('/api/hr/schedules', async (req, res) => {
   if (!requireStaff(req, res)) return
   try {
     const r = await pool.query(
-      `SELECT s.id, s.employee_id, e.full_name, e.department, e.employee_code,
+      `SELECT s.id, s.employee_id, e.full_name, e.department, e.position, e.employee_code,
               to_char(s.shift_date, 'YYYY-MM-DD') AS shift_date,
               to_char(s.shift_start, 'HH24:MI') AS shift_start,
               to_char(s.shift_end, 'HH24:MI') AS shift_end,
@@ -1498,7 +1808,7 @@ app.post('/api/hr/schedules', async (req, res) => {
     )
     await writeAudit(req, { action: 'create', entity: 'hr_schedule', entityId: r.rows[0].id, summary: `Scheduled shift on ${shift_date}` })
     const saved = await pool.query(
-      `SELECT s.id, s.employee_id, e.full_name, e.department, e.employee_code,
+      `SELECT s.id, s.employee_id, e.full_name, e.department, e.position, e.employee_code,
               to_char(s.shift_date, 'YYYY-MM-DD') AS shift_date,
               to_char(s.shift_start, 'HH24:MI') AS shift_start,
               to_char(s.shift_end, 'HH24:MI') AS shift_end,
@@ -1547,7 +1857,7 @@ app.get('/api/hr/payroll', async (req, res) => {
   if (!requireStaff(req, res)) return
   try {
     const r = await pool.query(
-      `SELECT p.id, p.employee_id, e.full_name, e.employee_code, e.department, e.salary_type,
+      `SELECT p.id, p.employee_id, e.full_name, e.employee_code, e.department, e.position, e.salary_type,
               to_char(p.period_start, 'YYYY-MM-DD') AS period_start,
               to_char(p.period_end, 'YYYY-MM-DD') AS period_end,
               p.base_salary, p.overtime_pay, p.bonuses, p.deductions, p.net_pay,
@@ -1616,7 +1926,7 @@ app.post('/api/hr/payroll', async (req, res) => {
        RETURNING id`,
       [employee_id, period_start, period_end, base, ot, bonus, ded, net, method, notes || null]
     )
-    await writeAudit(req, { action: 'create', entity: 'hr_payroll', entityId: r.rows[0].id, summary: `Payroll draft for ${emp.rows[0].full_name} ($${net.toFixed(2)})` })
+    await writeAudit(req, { action: 'create', entity: 'hr_payroll', entityId: r.rows[0].id, summary: `Payroll draft for ${emp.rows[0].full_name} (${formatMoney(net)})` })
     res.status(201).json({ id: r.rows[0].id, net_pay: net, status: 'draft' })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -1682,7 +1992,7 @@ app.get('/api/hr/leaves', async (req, res) => {
   if (!requireStaff(req, res)) return
   try {
     const r = await pool.query(
-      `SELECT l.id, l.employee_id, e.full_name, e.employee_code, e.department, l.leave_type,
+      `SELECT l.id, l.employee_id, e.full_name, e.employee_code, e.department, e.position, l.leave_type,
               to_char(l.start_date, 'YYYY-MM-DD') AS start_date,
               to_char(l.end_date, 'YYYY-MM-DD') AS end_date,
               l.days_count, l.reason, l.status

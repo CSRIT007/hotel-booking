@@ -22,7 +22,7 @@
               :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
             />
             <div class="p-6">
-              <p class="text-sm font-medium text-brand-700">${{ Number(room.price).toFixed(0) }} <span class="font-normal text-stone-500">per night</span></p>
+              <p class="text-sm font-medium text-brand-700">{{ formatMoney(room.price) }} <span class="font-normal text-stone-500">per night</span></p>
               <h2 class="mt-1 font-display text-2xl font-semibold text-stone-800">
                 <router-link :to="{ name: 'RoomDetail', params: { id: room.id } }" class="hover:text-brand-700">
                   {{ room.name }}
@@ -50,6 +50,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getRooms } from '../services/data'
+import { formatMoney } from '../utils/money'
 import PageHero from '../components/PageHero.vue'
 
 const route = useRoute()

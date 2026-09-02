@@ -19,7 +19,7 @@
             >
               <option value="" disabled>Select product</option>
               <option v-for="p in products" :key="p.id" :value="p.id">
-                {{ p.name }} — ${{ Number(p.price || 0).toFixed(2) }} (stock: {{ p.stock ?? '—' }})
+                {{ p.name }} — {{ formatMoney(p.price) }} (stock: {{ p.stock ?? '—' }})
               </option>
             </select>
           </div>
@@ -68,7 +68,7 @@
           <div class="flex items-center justify-between pt-2">
             <div class="text-xs">
               <p v-if="formTotal > 0" class="font-medium text-stone-800">
-                Total: ${{ formTotal.toFixed(2) }}
+                Total: {{ formatMoney(formTotal) }}
               </p>
               <p v-if="formError" class="mt-1 text-xs text-red-600">{{ formError }}</p>
               <p v-if="formSuccess" class="mt-1 text-xs text-green-600">{{ formSuccess }}</p>
@@ -96,7 +96,7 @@
         <div class="mt-4 grid gap-4 md:grid-cols-3">
           <div>
             <p class="text-xs font-medium uppercase text-stone-500">Total revenue</p>
-            <p class="mt-2 text-xl font-semibold text-stone-900">${{ totalRevenue.toFixed(2) }}</p>
+            <p class="mt-2 text-xl font-semibold text-stone-900">{{ formatMoney(totalRevenue) }}</p>
             <p class="mt-1 text-[11px] text-stone-500">Paid + pending transactions.</p>
           </div>
           <div>
@@ -107,7 +107,7 @@
           <div>
             <p class="text-xs font-medium uppercase text-stone-500">Average ticket</p>
             <p class="mt-2 text-xl font-semibold text-stone-900">
-              ${{ averageTicket.toFixed(2) }}
+              {{ formatMoney(averageTicket) }}
             </p>
             <p class="mt-1 text-[11px] text-stone-500">Average total per transaction.</p>
           </div>
@@ -127,7 +127,7 @@
           >
             <span class="font-medium text-stone-700 capitalize">{{ m.method.replace('_', ' ') }}</span>
             <span class="text-stone-600">
-              {{ m.count }} × • ${{ m.total.toFixed(2) }}
+              {{ m.count }} × • {{ formatMoney(m.total) }}
             </span>
           </div>
           <p v-if="paymentMethods.length === 0 && !loading" class="text-sm text-stone-500">No POS transactions yet.</p>
@@ -153,7 +153,7 @@
                 <td class="px-3 py-2 font-medium text-stone-800">{{ p.product_name || 'Product #' + p.product_id }}</td>
                 <td class="px-3 py-2 text-stone-600">{{ p.category || '—' }}</td>
                 <td class="px-3 py-2 text-right">{{ p.quantity }}</td>
-                <td class="px-3 py-2 text-right">${{ p.revenue.toFixed(2) }}</td>
+                <td class="px-3 py-2 text-right">{{ formatMoney(p.revenue) }}</td>
               </tr>
             </tbody>
           </table>
@@ -169,6 +169,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { getPosTransactions, getPosProducts, createPosTransaction } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 
 const transactions = ref([])
 const products = ref([])

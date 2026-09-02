@@ -38,7 +38,7 @@
       </div>
       <div class="rounded-xl border border-green-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-medium uppercase text-stone-500">Revenue</p>
-        <p class="mt-1 text-2xl font-bold text-green-600">${{ totalRevenue.toFixed(0) }}</p>
+        <p class="mt-1 text-2xl font-bold text-green-600">{{ formatMoney(totalRevenue) }}</p>
         <router-link to="/admin/bookings" class="mt-2 text-sm text-green-600 hover:underline">Bookings</router-link>
       </div>
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
@@ -100,7 +100,7 @@
               <td class="px-4 py-3">{{ b.username || b.email || '—' }}</td>
               <td class="px-4 py-3">{{ b.room_name || '—' }} <span v-if="b.hotel_name" class="text-stone-500">({{ b.hotel_name }})</span></td>
               <td class="px-4 py-3">{{ b.check_in }} → {{ b.check_out }}</td>
-              <td class="px-4 py-3">${{ Number(b.total_price || 0).toFixed(2) }}</td>
+              <td class="px-4 py-3">{{ formatMoney(b.total_price) }}</td>
               <td class="px-4 py-3">
                 <span
                   class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
@@ -133,7 +133,8 @@
         <li><router-link to="/admin/finance-revenue" class="text-brand-600 hover:underline">Revenue</router-link></li>
         <li><router-link to="/admin/finance-expense" class="text-brand-600 hover:underline">Expenses</router-link></li>
         <li><router-link to="/admin/finance-profit" class="text-brand-600 hover:underline">Profit</router-link></li>
-        <li><router-link to="/admin/hr-employees" class="text-brand-600 hover:underline">Employees</router-link></li>
+        <li><router-link to="/admin/hr-employees" class="text-brand-600 hover:underline">Employee information</router-link></li>
+        <li><router-link to="/admin/hr-org" class="text-brand-600 hover:underline">Departments</router-link></li>
         <li><router-link to="/admin/hr-schedules" class="text-brand-600 hover:underline">Schedules</router-link></li>
         <li><router-link to="/admin/hr-payroll" class="text-brand-600 hover:underline">Payroll</router-link></li>
         <li><router-link to="/admin/hr-leaves" class="text-brand-600 hover:underline">Leaves</router-link></li>
@@ -146,6 +147,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { getBookings, getRooms } from '../../services/data'
 import { useStaffAlerts } from '../../composables/useStaffAlerts'
+import { formatMoney } from '../../utils/money'
 
 const { newMessages } = useStaffAlerts()
 const bookings = ref([])

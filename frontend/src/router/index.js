@@ -38,7 +38,8 @@ const router = createRouter({
         { path: 'finance-revenue', name: 'AdminFinanceRevenue', component: () => import('../views/admin/AdminFinanceRevenueView.vue'), meta: { title: 'Revenue' } },
         { path: 'finance-expense', name: 'AdminFinanceExpense', component: () => import('../views/admin/AdminFinanceExpenseView.vue'), meta: { title: 'Expenses' } },
         { path: 'finance-profit', name: 'AdminFinanceProfit', component: () => import('../views/admin/AdminFinanceProfitView.vue'), meta: { title: 'Profit' } },
-        { path: 'hr-employees', name: 'AdminHrEmployees', component: () => import('../views/admin/AdminHrEmployeesView.vue'), meta: { title: 'Employees' } },
+        { path: 'hr-employees', name: 'AdminHrEmployees', component: () => import('../views/admin/AdminHrEmployeesView.vue'), meta: { title: 'Employee information' } },
+        { path: 'hr-org', name: 'AdminHrOrg', component: () => import('../views/admin/AdminHrOrgView.vue'), meta: { title: 'Departments' } },
         { path: 'hr-schedules', name: 'AdminHrSchedules', component: () => import('../views/admin/AdminHrSchedulesView.vue'), meta: { title: 'Schedules' } },
         { path: 'hr-payroll', name: 'AdminHrPayroll', component: () => import('../views/admin/AdminHrPayrollView.vue'), meta: { title: 'Payroll' } },
         { path: 'hr-leaves', name: 'AdminHrLeaves', component: () => import('../views/admin/AdminHrLeavesView.vue'), meta: { title: 'Leaves' } },
@@ -63,6 +64,10 @@ router.beforeEach((to, _from, next) => {
   const { isLoggedIn, isStaff } = useAuth()
   if (to.meta.guestOnly && isLoggedIn.value) {
     next({ name: 'Home' })
+    return
+  }
+  if (to.name === 'AdminLogin' && isLoggedIn.value && isStaff.value) {
+    next({ name: 'AdminDashboard' })
     return
   }
   if (to.meta.requiresAuth && !isLoggedIn.value) {
