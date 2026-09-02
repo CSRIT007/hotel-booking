@@ -766,3 +766,87 @@ export async function getCrmCommunications() {
 export async function createCrmCommunication(payload) {
   return requireLocal(() => localApi.createCrmCommunication(payload), 'Failed to send message')
 }
+
+export async function getMaintenanceRequests() {
+  if (!hasLocalApi) return { requests: [], rooms: [], staff: [] }
+  try {
+    return await localApi.getMaintenanceRequests()
+  } catch (e) {
+    console.warn('Local API getMaintenanceRequests failed:', e.message)
+    return { requests: [], rooms: [], staff: [] }
+  }
+}
+
+export async function createMaintenanceRequest(payload) {
+  return requireLocal(() => localApi.createMaintenanceRequest(payload), 'Failed to open work order')
+}
+
+export async function updateMaintenanceRequest(id, payload) {
+  return requireLocal(() => localApi.updateMaintenanceRequest(id, payload), 'Failed to update work order')
+}
+
+export async function deleteMaintenanceRequest(id) {
+  return requireLocal(() => localApi.deleteMaintenanceRequest(id), 'Failed to delete work order')
+}
+
+export async function getMaintenanceSchedule() {
+  if (!hasLocalApi) return { schedules: [], rooms: [], staff: [] }
+  try {
+    return await localApi.getMaintenanceSchedule()
+  } catch (e) {
+    console.warn('Local API getMaintenanceSchedule failed:', e.message)
+    return { schedules: [], rooms: [], staff: [] }
+  }
+}
+
+export async function createMaintenanceSchedule(payload) {
+  return requireLocal(() => localApi.createMaintenanceSchedule(payload), 'Failed to save schedule')
+}
+
+export async function updateMaintenanceSchedule(id, payload) {
+  return requireLocal(() => localApi.updateMaintenanceSchedule(id, payload), 'Failed to update schedule')
+}
+
+export async function logMaintenanceService(id) {
+  return requireLocal(() => localApi.logMaintenanceService(id), 'Failed to log service')
+}
+
+export async function deleteMaintenanceSchedule(id) {
+  return requireLocal(() => localApi.deleteMaintenanceSchedule(id), 'Failed to delete schedule')
+}
+
+export async function getMaintenanceInventory() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getMaintenanceInventory()
+  } catch (e) {
+    console.warn('Local API getMaintenanceInventory failed:', e.message)
+    return []
+  }
+}
+
+export async function createMaintenancePart(payload) {
+  return requireLocal(() => localApi.createMaintenancePart(payload), 'Failed to add part')
+}
+
+export async function updateMaintenancePart(id, payload) {
+  return requireLocal(() => localApi.updateMaintenancePart(id, payload), 'Failed to update stock')
+}
+
+export async function deleteMaintenancePart(id) {
+  return requireLocal(() => localApi.deleteMaintenancePart(id), 'Failed to remove part')
+}
+
+export async function getAnalytics(params) {
+  if (!hasLocalApi) return {}
+  try {
+    return await localApi.getAnalytics(params)
+  } catch (e) {
+    console.warn('Local API getAnalytics failed:', e.message)
+    return {}
+  }
+}
+
+export async function createGuestSatisfaction(payload) {
+  return requireLocal(() => localApi.createGuestSatisfaction(payload), 'Failed to save survey')
+}

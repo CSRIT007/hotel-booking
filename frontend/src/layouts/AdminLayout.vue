@@ -101,9 +101,9 @@
             <span>{{ openGroup === 'maintenance' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'maintenance'" class="admin-sub">
-            <router-link to="/admin/maintenance-requests" class="admin-sub-link">Requests</router-link>
-            <router-link to="/admin/maintenance-schedule" class="admin-sub-link">Schedule</router-link>
-            <router-link to="/admin/maintenance-inventory" class="admin-sub-link">Inventory</router-link>
+            <router-link to="/admin/maintenance-requests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-requests') }">Requests</router-link>
+            <router-link to="/admin/maintenance-schedule" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-schedule') }">Schedule</router-link>
+            <router-link to="/admin/maintenance-inventory" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-inventory') }">Inventory</router-link>
           </div>
         </div>
 
@@ -114,7 +114,7 @@
           </button>
           <div v-show="openGroup === 'analytics'" class="admin-sub">
             <router-link to="/admin/reports" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/reports') }">Reports</router-link>
-            <router-link to="/admin/analytics-kpi" class="admin-sub-link">KPIs</router-link>
+            <router-link to="/admin/analytics-kpi" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/analytics-kpi') }">KPIs</router-link>
           </div>
         </div>
 

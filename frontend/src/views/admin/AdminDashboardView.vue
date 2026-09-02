@@ -169,6 +169,8 @@ const quickLinks = [
   { to: '/admin/hr-payroll', label: 'Payroll' },
   { to: '/admin/hr-leaves', label: 'Leaves' },
   { to: '/admin/maintenance-requests', label: 'Requests' },
+  { to: '/admin/maintenance-schedule', label: 'Schedule' },
+  { to: '/admin/maintenance-inventory', label: 'Inventory' },
   { to: '/admin/analytics-kpi', label: 'KPI' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/audit-log', label: 'Audit log' },

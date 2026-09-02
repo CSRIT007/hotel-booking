@@ -2171,6 +2171,13 @@ async function releaseRoomIfReady(roomId) {
     [roomId]
   )
   if (open.rows.length) return
+  const maint = await pool.query(
+    `SELECT 1 FROM maintenance_requests
+     WHERE room_id = $1 AND status IN ('open', 'assigned', 'in_progress', 'on_hold')
+     LIMIT 1`,
+    [roomId]
+  )
+  if (maint.rows.length) return
   await pool.query(
     `UPDATE rooms SET status = 'available' WHERE id = $1 AND status = 'booked'`,
     [roomId]
@@ -2293,7 +2300,7 @@ app.post('/api/housekeeping', async (req, res) => {
     const room = await pool.query('SELECT id, name, status FROM rooms WHERE id = $1', [room_id])
     if (!room.rows[0]) return res.status(404).json({ error: 'Room not found.' })
     if (room.rows[0].status === 'maintenance') {
-      return res.status(400).json({ error: 'This room is in maintenance. Return it from Rooms first.' })
+      return res.status(400).json({ error: 'This room is in maintenance. Complete the work order first.' })
     }
     const type = ['checkout', 'stayover', 'deep_clean'].includes(task_type) ? task_type : 'checkout'
     const occupied = await roomIsOccupied(room_id)
@@ -3150,6 +3157,931 @@ app.post('/api/crm/communications', async (req, res) => {
   }
 })
 
+const MAINT_TYPES = ['repair', 'preventive', 'inspection', 'emergency', 'upgrade']
+const MAINT_PRIORITIES = ['low', 'medium', 'high', 'critical']
+const MAINT_OPEN = ['open', 'assigned', 'in_progress', 'on_hold']
+const MAINT_STATUSES = [...MAINT_OPEN, 'completed', 'cancelled']
+const MAINT_FREQUENCIES = ['daily', 'weekly', 'monthly', 'quarterly', 'annually']
+
+function nextServiceDate(fromDate, frequency) {
+  const d = new Date(`${fromDate}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return fromDate
+  if (frequency === 'daily') d.setDate(d.getDate() + 1)
+  else if (frequency === 'weekly') d.setDate(d.getDate() + 7)
+  else if (frequency === 'monthly') d.setMonth(d.getMonth() + 1)
+  else if (frequency === 'quarterly') d.setMonth(d.getMonth() + 3)
+  else d.setFullYear(d.getFullYear() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+function stockStatus(quantity, minQuantity) {
+  const qty = Number(quantity || 0)
+  const min = Number(minQuantity || 0)
+  if (qty <= 0) return 'out_of_stock'
+  if (qty <= min) return 'low_stock'
+  return 'in_stock'
+}
+
+async function maintenanceStaff() {
+  const specialized = await pool.query(
+    `SELECT id, full_name, employee_code, department, position
+     FROM hr_employees
+     WHERE status = 'active'
+       AND (position ILIKE '%maintenance%' OR department ILIKE '%maintenance%')
+     ORDER BY full_name`
+  )
+  if (specialized.rows.length) return specialized.rows
+  const fallback = await pool.query(
+    `SELECT id, full_name, employee_code, department, position
+     FROM hr_employees WHERE status = 'active' ORDER BY full_name`
+  )
+  return fallback.rows
+}
+
+async function syncRoomMaintenance(roomId) {
+  if (!roomId) return
+  const open = await pool.query(
+    `SELECT 1 FROM maintenance_requests
+     WHERE room_id = $1 AND status = ANY($2::varchar[])
+     LIMIT 1`,
+    [roomId, MAINT_OPEN]
+  )
+  if (open.rows[0]) {
+    await pool.query("UPDATE rooms SET status = 'maintenance' WHERE id = $1", [roomId])
+    return
+  }
+  const room = await pool.query('SELECT id, status FROM rooms WHERE id = $1', [roomId])
+  if (!room.rows[0] || room.rows[0].status !== 'maintenance') return
+  if (await roomIsOccupied(roomId)) {
+    await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1", [roomId])
+    return
+  }
+  const hk = await pool.query(
+    `SELECT 1 FROM housekeeping_tasks WHERE room_id = $1 AND status IN ('dirty', 'in_progress') LIMIT 1`,
+    [roomId]
+  )
+  await pool.query(
+    `UPDATE rooms SET status = $2 WHERE id = $1`,
+    [roomId, hk.rows[0] ? 'booked' : 'available']
+  )
+}
+
+async function postMaintenanceExpense(request, amount) {
+  if (request.expense_id || !(Number(amount) > 0)) return request.expense_id || null
+  const where = request.room_name
+    ? `${request.room_name}${request.hotel_name ? ` — ${request.hotel_name}` : ''}`
+    : (request.location || 'property')
+  const ins = await pool.query(
+    `INSERT INTO expenses (description, category, amount, expense_date, payment_method)
+     VALUES ($1, 'Maintenance', $2, CURRENT_DATE, 'cash')
+     RETURNING id`,
+    [`Work order #${request.id} — ${where}`, Number(amount)]
+  )
+  await pool.query('UPDATE maintenance_requests SET expense_id = $1 WHERE id = $2', [ins.rows[0].id, request.id])
+  return ins.rows[0].id
+}
+
+async function ensureMaintenanceTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_requests (
+      id SERIAL PRIMARY KEY,
+      room_id INT REFERENCES rooms(id) ON DELETE SET NULL,
+      location VARCHAR(200),
+      request_type VARCHAR(20) NOT NULL DEFAULT 'repair'
+        CHECK (request_type IN ('repair', 'preventive', 'inspection', 'emergency', 'upgrade')),
+      category VARCHAR(80) NOT NULL DEFAULT 'Other',
+      priority VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'critical')),
+      description TEXT NOT NULL,
+      assigned_to INT REFERENCES hr_employees(id) ON DELETE SET NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'assigned', 'in_progress', 'on_hold', 'completed', 'cancelled')),
+      scheduled_date DATE,
+      completed_at TIMESTAMPTZ,
+      estimated_cost NUMERIC(12,2) CHECK (estimated_cost IS NULL OR estimated_cost >= 0),
+      actual_cost NUMERIC(12,2) CHECK (actual_cost IS NULL OR actual_cost >= 0),
+      expense_id INT,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_maint_req_status ON maintenance_requests(status)')
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_maint_req_room ON maintenance_requests(room_id)')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS maintenance_schedule (
+      id SERIAL PRIMARY KEY,
+      asset_name VARCHAR(200) NOT NULL,
+      asset_location VARCHAR(200),
+      room_id INT REFERENCES rooms(id) ON DELETE SET NULL,
+      maintenance_type VARCHAR(100) NOT NULL,
+      frequency VARCHAR(20) NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly', 'quarterly', 'annually')),
+      last_service_date DATE,
+      next_service_date DATE NOT NULL,
+      assigned_to INT REFERENCES hr_employees(id) ON DELETE SET NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_maint_sched_next ON maintenance_schedule(next_service_date)')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS spare_parts_inventory (
+      id SERIAL PRIMARY KEY,
+      part_name VARCHAR(200) NOT NULL,
+      part_number VARCHAR(80),
+      category VARCHAR(80),
+      quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+      min_quantity INT NOT NULL DEFAULT 0 CHECK (min_quantity >= 0),
+      unit_cost NUMERIC(12,2) CHECK (unit_cost IS NULL OR unit_cost >= 0),
+      supplier VARCHAR(200),
+      location VARCHAR(100),
+      last_restocked DATE,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  const parts = await pool.query('SELECT 1 FROM spare_parts_inventory LIMIT 1')
+  if (!parts.rows.length) {
+    await pool.query(
+      `INSERT INTO spare_parts_inventory (part_name, part_number, category, quantity, min_quantity, unit_cost, supplier, location)
+       VALUES
+         ('AC filter', 'HVAC-AF-16', 'HVAC', 8, 3, 12.00, 'CoolAir Supply', 'Plant room'),
+         ('LED bulb 9W', 'EL-LED-9', 'Electrical', 24, 10, 2.50, 'City Electric', 'Store'),
+         ('Faucet washer', 'PL-WASH-1', 'Plumbing', 2, 5, 0.80, 'PipeWorks', 'Store')`
+    )
+  }
+}
+
+app.get('/api/maintenance/requests', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT m.id, m.room_id, r.name AS room_name, h.name AS hotel_name, m.location,
+              m.request_type, m.category, m.priority, m.description, m.assigned_to,
+              e.full_name AS assigned_name, m.status,
+              to_char(m.scheduled_date, 'YYYY-MM-DD') AS scheduled_date,
+              to_char(m.completed_at, 'YYYY-MM-DD HH24:MI') AS completed_at,
+              m.estimated_cost, m.actual_cost, m.notes,
+              to_char(m.created_at, 'YYYY-MM-DD') AS created_at
+       FROM maintenance_requests m
+       LEFT JOIN rooms r ON r.id = m.room_id
+       LEFT JOIN hotels h ON h.id = r.hotel_id
+       LEFT JOIN hr_employees e ON e.id = m.assigned_to
+       ORDER BY
+         CASE m.status
+           WHEN 'in_progress' THEN 1 WHEN 'assigned' THEN 2 WHEN 'open' THEN 3
+           WHEN 'on_hold' THEN 4 ELSE 5
+         END,
+         CASE m.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+         m.id DESC`
+    )
+    const rooms = await pool.query(
+      `SELECT r.id, r.name, r.status, h.name AS hotel_name
+       FROM rooms r JOIN hotels h ON h.id = r.hotel_id ORDER BY h.name, r.name`
+    )
+    res.json({ requests: r.rows, rooms: rooms.rows, staff: await maintenanceStaff() })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/maintenance/requests', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { room_id, location, request_type, category, priority, description, assigned_to, scheduled_date, estimated_cost, notes } = req.body || {}
+    const desc = String(description || '').trim()
+    if (!desc) return res.status(400).json({ error: 'Describe the issue.' })
+    const loc = String(location || '').trim()
+    const roomId = room_id ? parseInt(room_id, 10) : null
+    if (!roomId && !loc) return res.status(400).json({ error: 'Select a room or enter a location.' })
+    if (roomId) {
+      const room = await pool.query('SELECT id FROM rooms WHERE id = $1', [roomId])
+      if (!room.rows[0]) return res.status(404).json({ error: 'Room not found.' })
+    }
+    const type = MAINT_TYPES.includes(request_type) ? request_type : 'repair'
+    const pri = MAINT_PRIORITIES.includes(priority) ? priority : 'medium'
+    const assignee = assigned_to ? parseInt(assigned_to, 10) : null
+    const status = assignee ? 'assigned' : 'open'
+    const estimate = estimated_cost === '' || estimated_cost == null ? null : Number(estimated_cost)
+    if (estimate != null && (!Number.isFinite(estimate) || estimate < 0)) {
+      return res.status(400).json({ error: 'Estimated cost must be zero or more.' })
+    }
+    const r = await pool.query(
+      `INSERT INTO maintenance_requests
+         (room_id, location, request_type, category, priority, description, assigned_to, status, scheduled_date, estimated_cost, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id`,
+      [roomId, loc || null, type, String(category || 'Other').trim() || 'Other', pri, desc, assignee, status, scheduled_date || null, estimate, notes || null]
+    )
+    await syncRoomMaintenance(roomId)
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'maintenance_request',
+      entityId: r.rows[0].id,
+      summary: `Opened ${type} work order #${r.rows[0].id}`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/maintenance/requests/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(
+      `SELECT m.*, r.name AS room_name, h.name AS hotel_name
+       FROM maintenance_requests m
+       LEFT JOIN rooms r ON r.id = m.room_id
+       LEFT JOIN hotels h ON h.id = r.hotel_id
+       WHERE m.id = $1`,
+      [req.params.id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'Work order not found.' })
+    const row = current.rows[0]
+    if (row.status === 'completed' || row.status === 'cancelled') {
+      return res.status(400).json({ error: 'This work order is already closed.' })
+    }
+    let assignedTo = row.assigned_to
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assigned_to')) {
+      assignedTo = req.body.assigned_to ? parseInt(req.body.assigned_to, 10) : null
+    }
+    let nextStatus = row.status
+    if (req.body?.status) {
+      if (!MAINT_STATUSES.includes(req.body.status)) return res.status(400).json({ error: 'Invalid status.' })
+      nextStatus = req.body.status
+    } else if (assignedTo && row.status === 'open') {
+      nextStatus = 'assigned'
+    } else if (!assignedTo && nextStatus === 'assigned') {
+      nextStatus = 'open'
+    }
+    if (['in_progress', 'completed'].includes(nextStatus) && !assignedTo) {
+      return res.status(400).json({ error: 'Assign a technician before starting or completing work.' })
+    }
+    let actual = row.actual_cost
+    if (req.body?.actual_cost != null && req.body.actual_cost !== '') {
+      actual = Number(req.body.actual_cost)
+      if (!Number.isFinite(actual) || actual < 0) return res.status(400).json({ error: 'Actual cost must be zero or more.' })
+    }
+    const notes = req.body?.notes != null ? req.body.notes : row.notes
+    const completedAt = nextStatus === 'completed' ? new Date() : null
+    await pool.query(
+      `UPDATE maintenance_requests
+       SET assigned_to = $1, status = $2, actual_cost = $3, notes = $4, completed_at = $5
+       WHERE id = $6`,
+      [assignedTo, nextStatus, actual, notes, completedAt, row.id]
+    )
+    if (nextStatus === 'completed' && Number(actual) > 0) {
+      await postMaintenanceExpense({ ...row, status: nextStatus }, actual)
+    }
+    await syncRoomMaintenance(row.room_id)
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'maintenance_request',
+      entityId: row.id,
+      summary: `Work order #${row.id} marked ${nextStatus}`,
+    })
+    res.json({ ok: true, id: row.id, status: nextStatus })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/maintenance/requests/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT id, room_id, status FROM maintenance_requests WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Work order not found.' })
+    if (!['open', 'cancelled'].includes(current.rows[0].status)) {
+      return res.status(400).json({ error: 'Only an open or cancelled work order can be removed.' })
+    }
+    await pool.query('DELETE FROM maintenance_requests WHERE id = $1', [req.params.id])
+    await syncRoomMaintenance(current.rows[0].room_id)
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'maintenance_request',
+      entityId: current.rows[0].id,
+      summary: `Deleted work order #${current.rows[0].id}`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/maintenance/schedule', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT s.id, s.asset_name, s.asset_location, s.room_id, rm.name AS room_name, h.name AS hotel_name,
+              s.maintenance_type, s.frequency,
+              to_char(s.last_service_date, 'YYYY-MM-DD') AS last_service_date,
+              to_char(s.next_service_date, 'YYYY-MM-DD') AS next_service_date,
+              s.assigned_to, e.full_name AS assigned_name, s.status, s.notes,
+              (s.status = 'active' AND s.next_service_date < CURRENT_DATE) AS overdue
+       FROM maintenance_schedule s
+       LEFT JOIN rooms rm ON rm.id = s.room_id
+       LEFT JOIN hotels h ON h.id = rm.hotel_id
+       LEFT JOIN hr_employees e ON e.id = s.assigned_to
+       ORDER BY s.status, s.next_service_date, s.id`
+    )
+    const rooms = await pool.query(
+      `SELECT r.id, r.name, h.name AS hotel_name FROM rooms r JOIN hotels h ON h.id = r.hotel_id ORDER BY h.name, r.name`
+    )
+    res.json({ schedules: r.rows, rooms: rooms.rows, staff: await maintenanceStaff() })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/maintenance/schedule', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { asset_name, asset_location, room_id, maintenance_type, frequency, next_service_date, assigned_to, notes } = req.body || {}
+    const name = String(asset_name || '').trim()
+    const type = String(maintenance_type || '').trim()
+    if (!name) return res.status(400).json({ error: 'Asset name is required.' })
+    if (!type) return res.status(400).json({ error: 'Maintenance type is required.' })
+    const freq = MAINT_FREQUENCIES.includes(frequency) ? frequency : null
+    if (!freq) return res.status(400).json({ error: 'Choose a frequency.' })
+    if (!next_service_date) return res.status(400).json({ error: 'Next service date is required.' })
+    const roomId = room_id ? parseInt(room_id, 10) : null
+    const r = await pool.query(
+      `INSERT INTO maintenance_schedule
+         (asset_name, asset_location, room_id, maintenance_type, frequency, next_service_date, assigned_to, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
+      [name, String(asset_location || '').trim() || null, roomId || null, type, freq, next_service_date, assigned_to ? parseInt(assigned_to, 10) : null, notes || null]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'maintenance_schedule',
+      entityId: r.rows[0].id,
+      summary: `Scheduled ${freq} service for “${name}”`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/maintenance/schedule/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM maintenance_schedule WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Schedule not found.' })
+    const row = current.rows[0]
+    const status = ['active', 'inactive'].includes(req.body?.status) ? req.body.status : row.status
+    const assignedTo = Object.prototype.hasOwnProperty.call(req.body || {}, 'assigned_to')
+      ? (req.body.assigned_to ? parseInt(req.body.assigned_to, 10) : null)
+      : row.assigned_to
+    await pool.query(
+      'UPDATE maintenance_schedule SET status = $1, assigned_to = $2 WHERE id = $3',
+      [status, assignedTo, row.id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'maintenance_schedule',
+      entityId: row.id,
+      summary: `Schedule “${row.asset_name}” marked ${status}`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/maintenance/schedule/:id/service', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(
+      `SELECT s.*, r.name AS room_name, h.name AS hotel_name
+       FROM maintenance_schedule s
+       LEFT JOIN rooms r ON r.id = s.room_id
+       LEFT JOIN hotels h ON h.id = r.hotel_id
+       WHERE s.id = $1`,
+      [req.params.id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'Schedule not found.' })
+    const row = current.rows[0]
+    if (row.status !== 'active') return res.status(400).json({ error: 'Reactivate this schedule before logging service.' })
+    const today = new Date().toISOString().slice(0, 10)
+    const next = nextServiceDate(today, row.frequency)
+    const loc = row.asset_location || (row.room_name ? `${row.room_name}${row.hotel_name ? ` — ${row.hotel_name}` : ''}` : row.asset_name)
+    const created = await pool.query(
+      `INSERT INTO maintenance_requests
+         (room_id, location, request_type, category, priority, description, assigned_to, status, scheduled_date)
+       VALUES ($1, $2, 'preventive', $3, 'medium', $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        row.room_id,
+        loc,
+        row.maintenance_type,
+        `Preventive service for ${row.asset_name}`,
+        row.assigned_to,
+        row.assigned_to ? 'assigned' : 'open',
+        today,
+      ]
+    )
+    await pool.query(
+      `UPDATE maintenance_schedule SET last_service_date = $1, next_service_date = $2 WHERE id = $3`,
+      [today, next, row.id]
+    )
+    await syncRoomMaintenance(row.room_id)
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'maintenance_schedule',
+      entityId: row.id,
+      summary: `Logged service for “${row.asset_name}” (work order #${created.rows[0].id})`,
+    })
+    res.json({ ok: true, request_id: created.rows[0].id, next_service_date: next })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/maintenance/schedule/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM maintenance_schedule WHERE id = $1 RETURNING id, asset_name', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Schedule not found.' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'maintenance_schedule',
+      entityId: r.rows[0].id,
+      summary: `Removed schedule “${r.rows[0].asset_name}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/maintenance/inventory', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT id, part_name, part_number, category, quantity, min_quantity, unit_cost, supplier, location,
+              to_char(last_restocked, 'YYYY-MM-DD') AS last_restocked, notes
+       FROM spare_parts_inventory
+       ORDER BY part_name`
+    )
+    res.json(r.rows.map((row) => ({ ...row, stock_status: stockStatus(row.quantity, row.min_quantity) })))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/maintenance/inventory', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { part_name, part_number, category, quantity, min_quantity, unit_cost, supplier, location, notes } = req.body || {}
+    const name = String(part_name || '').trim()
+    if (!name) return res.status(400).json({ error: 'Part name is required.' })
+    const qty = parseInt(quantity, 10)
+    const min = parseInt(min_quantity, 10)
+    if (!Number.isFinite(qty) || qty < 0) return res.status(400).json({ error: 'Quantity must be zero or more.' })
+    const cost = unit_cost === '' || unit_cost == null ? null : Number(unit_cost)
+    if (cost != null && (!Number.isFinite(cost) || cost < 0)) return res.status(400).json({ error: 'Unit cost must be zero or more.' })
+    const r = await pool.query(
+      `INSERT INTO spare_parts_inventory
+         (part_name, part_number, category, quantity, min_quantity, unit_cost, supplier, location, last_restocked, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $4 > 0 THEN CURRENT_DATE ELSE NULL END, $9)
+       RETURNING id`,
+      [name, String(part_number || '').trim() || null, String(category || '').trim() || 'Other', qty, Number.isFinite(min) && min >= 0 ? min : 0, cost, String(supplier || '').trim() || null, String(location || '').trim() || null, notes || null]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'spare_part',
+      entityId: r.rows[0].id,
+      summary: `Added spare part “${name}” (${qty} on hand)`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/maintenance/inventory/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM spare_parts_inventory WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Part not found.' })
+    const row = current.rows[0]
+    let qty = Number(row.quantity)
+    let lastRestocked = row.last_restocked
+    if (req.body?.restock != null) {
+      const add = parseInt(req.body.restock, 10)
+      if (!Number.isFinite(add) || add < 1) return res.status(400).json({ error: 'Restock at least 1 unit.' })
+      qty += add
+      lastRestocked = new Date()
+    } else if (req.body?.use != null) {
+      const take = parseInt(req.body.use, 10)
+      if (!Number.isFinite(take) || take < 1) return res.status(400).json({ error: 'Use at least 1 unit.' })
+      if (take > qty) return res.status(400).json({ error: 'Not enough stock on hand.' })
+      qty -= take
+    } else if (req.body?.quantity != null) {
+      qty = parseInt(req.body.quantity, 10)
+      if (!Number.isFinite(qty) || qty < 0) return res.status(400).json({ error: 'Quantity must be zero or more.' })
+    }
+    const min = req.body?.min_quantity != null ? parseInt(req.body.min_quantity, 10) : row.min_quantity
+    await pool.query(
+      `UPDATE spare_parts_inventory
+       SET quantity = $1, min_quantity = $2, last_restocked = $3
+       WHERE id = $4`,
+      [qty, Number.isFinite(min) && min >= 0 ? min : row.min_quantity, lastRestocked, row.id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'spare_part',
+      entityId: row.id,
+      summary: `Updated stock for “${row.part_name}” to ${qty}`,
+    })
+    res.json({ ok: true, quantity: qty, stock_status: stockStatus(qty, min) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/maintenance/inventory/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM spare_parts_inventory WHERE id = $1 RETURNING id, part_name', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Part not found.' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'spare_part',
+      entityId: r.rows[0].id,
+      summary: `Removed spare part “${r.rows[0].part_name}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+function addDaysKey(key, n) {
+  const [y, m, d] = String(key).split('-').map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  return ymd(dt)
+}
+
+function todayKey() {
+  return ymd(new Date())
+}
+
+function monthStartKey() {
+  const d = new Date()
+  return ymd(new Date(d.getFullYear(), d.getMonth(), 1))
+}
+
+function daysInclusiveKeys(from, to) {
+  const a = new Date(`${from}T00:00:00`)
+  const b = new Date(`${to}T00:00:00`)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0
+  return Math.round((b - a) / 86400000) + 1
+}
+
+function stayNights(checkIn, checkOut) {
+  const n = Math.round((new Date(`${checkOut}T00:00:00`) - new Date(`${checkIn}T00:00:00`)) / 86400000)
+  return Math.max(1, n)
+}
+
+function overlapNights(checkIn, checkOut, from, to) {
+  const start = checkIn > from ? checkIn : from
+  const endEx = checkOut < addDaysKey(to, 1) ? checkOut : addDaysKey(to, 1)
+  const n = Math.round((new Date(`${endEx}T00:00:00`) - new Date(`${start}T00:00:00`)) / 86400000)
+  return Math.max(0, n)
+}
+
+function parseAnalyticsRange(query) {
+  let from = String(query?.from || '').slice(0, 10)
+  let to = String(query?.to || '').slice(0, 10)
+  const hasFrom = /^\d{4}-\d{2}-\d{2}$/.test(from)
+  const hasTo = /^\d{4}-\d{2}-\d{2}$/.test(to)
+  if (!hasFrom && !hasTo) {
+    from = '2020-01-01'
+    to = todayKey()
+  } else {
+    if (!hasFrom) from = monthStartKey()
+    if (!hasTo) to = todayKey()
+  }
+  if (from > to) [from, to] = [to, from]
+  if (daysInclusiveKeys(from, to) > 366) from = addDaysKey(to, -365)
+  return { from, to }
+}
+
+function deltaPct(curr, prev) {
+  const a = Number(curr) || 0
+  const b = Number(prev)
+  if (!Number.isFinite(b) || b === 0) return a === 0 ? 0 : null
+  return ((a - b) / Math.abs(b)) * 100
+}
+
+async function ensureAnalyticsTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS guest_satisfaction (
+      id SERIAL PRIMARY KEY,
+      booking_id INT NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      overall_rating NUMERIC(2,1) NOT NULL CHECK (overall_rating >= 1 AND overall_rating <= 5),
+      cleanliness_rating NUMERIC(2,1) CHECK (cleanliness_rating IS NULL OR (cleanliness_rating >= 1 AND cleanliness_rating <= 5)),
+      service_rating NUMERIC(2,1) CHECK (service_rating IS NULL OR (service_rating >= 1 AND service_rating <= 5)),
+      feedback TEXT,
+      would_recommend BOOLEAN,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+}
+
+async function loadAnalyticsBookings(from, to) {
+  const r = await pool.query(
+    `SELECT b.id, b.user_id, b.room_id, b.status, b.total_price, b.guests,
+            to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
+            to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
+            to_char(b.created_at, 'YYYY-MM-DD') AS created_at,
+            u.username, u.email,
+            r.name AS room_name, h.name AS hotel_name,
+            COALESCE(c.name, 'Direct') AS channel_name
+     FROM bookings b
+     JOIN users u ON u.id = b.user_id
+     JOIN rooms r ON r.id = b.room_id
+     JOIN hotels h ON h.id = r.hotel_id
+     LEFT JOIN crs_channels c ON c.id = b.channel_id
+     WHERE b.check_in <= $2::date AND b.check_out > $1::date`,
+    [from, to]
+  )
+  return r.rows
+}
+
+function summarizePeriod(bookings, roomCount, from, to) {
+  const nights = daysInclusiveKeys(from, to)
+  const availableNights = roomCount * nights
+  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const cancelled = bookings.filter((b) => b.status === 'cancelled')
+  const arrived = recognized.filter((b) => b.check_in >= from && b.check_in <= to)
+  const departed = recognized.filter((b) => b.check_out >= from && b.check_out <= to)
+  let occupiedNights = 0
+  let roomRevenue = 0
+  let stayNightsSum = 0
+  const guestIds = new Set()
+  const guestStays = {}
+  for (const b of recognized) {
+    const stay = stayNights(b.check_in, b.check_out)
+    const overlap = overlapNights(b.check_in, b.check_out, from, to)
+    occupiedNights += overlap
+    roomRevenue += stay ? (Number(b.total_price || 0) * overlap) / stay : 0
+    stayNightsSum += stay
+    guestIds.add(b.user_id)
+    guestStays[b.user_id] = (guestStays[b.user_id] || 0) + 1
+  }
+  const occupancy = availableNights ? (occupiedNights / availableNights) * 100 : 0
+  const adr = occupiedNights ? roomRevenue / occupiedNights : 0
+  const revpar = availableNights ? roomRevenue / availableNights : 0
+  const alos = recognized.length ? stayNightsSum / recognized.length : 0
+  const bookingCount = bookings.length
+  const cancelRate = bookingCount ? (cancelled.length / bookingCount) * 100 : 0
+  const avgStayValue = recognized.length ? recognized.reduce((s, b) => s + Number(b.total_price || 0), 0) / recognized.length : 0
+  const repeats = Object.values(guestStays).filter((n) => n > 1).length
+  const repeatRate = guestIds.size ? (repeats / guestIds.size) * 100 : 0
+  return {
+    from,
+    to,
+    nights,
+    rooms: roomCount,
+    available_nights: availableNights,
+    occupied_nights: occupiedNights,
+    occupancy,
+    adr,
+    revpar,
+    alos,
+    room_revenue: roomRevenue,
+    bookings: bookingCount,
+    recognized: recognized.length,
+    cancelled: cancelled.length,
+    pending: bookings.filter((b) => b.status === 'pending').length,
+    cancel_rate: cancelRate,
+    arrivals: arrived.length,
+    departures: departed.length,
+    guests: guestIds.size,
+    avg_stay_value: avgStayValue,
+    repeat_rate: repeatRate,
+  }
+}
+
+function buildDaily(bookings, roomCount, from, to) {
+  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const days = []
+  let maxOcc = 1
+  for (let d = from; d <= to; d = addDaysKey(d, 1)) {
+    const staying = recognized.filter((b) => b.check_in <= d && b.check_out > d)
+    const occupied = new Set(staying.map((b) => b.room_id)).size
+    let revenue = 0
+    for (const b of staying) {
+      revenue += Number(b.total_price || 0) / stayNights(b.check_in, b.check_out)
+    }
+    maxOcc = Math.max(maxOcc, occupied)
+    days.push({
+      date: d,
+      occupied,
+      available: roomCount,
+      occupancy: roomCount ? (occupied / roomCount) * 100 : 0,
+      revenue,
+    })
+  }
+  return days.map((row) => ({ ...row, bar: Math.round((row.occupied / maxOcc) * 100) }))
+}
+
+function groupTotals(rows, key, valueFn) {
+  const map = new Map()
+  for (const row of rows) {
+    const name = row[key] || '—'
+    const cur = map.get(name) || { name, bookings: 0, nights: 0, revenue: 0 }
+    cur.bookings += 1
+    cur.nights += valueFn.nights(row)
+    cur.revenue += valueFn.revenue(row)
+    map.set(name, cur)
+  }
+  return [...map.values()].sort((a, b) => b.revenue - a.revenue)
+}
+
+async function buildAnalytics(from, to) {
+  const rooms = await pool.query('SELECT COUNT(*)::int AS n FROM rooms')
+  const roomCount = rooms.rows[0]?.n || 0
+  const prevNights = daysInclusiveKeys(from, to)
+  const prevTo = addDaysKey(from, -1)
+  const prevFrom = addDaysKey(prevTo, -(prevNights - 1))
+  const [currentRows, previousRows] = await Promise.all([
+    loadAnalyticsBookings(from, to),
+    loadAnalyticsBookings(prevFrom, prevTo),
+  ])
+  const current = summarizePeriod(currentRows, roomCount, from, to)
+  const previous = summarizePeriod(previousRows, roomCount, prevFrom, prevTo)
+  const kpis = {
+    occupancy: { value: current.occupancy, previous: previous.occupancy, delta: deltaPct(current.occupancy, previous.occupancy) },
+    adr: { value: current.adr, previous: previous.adr, delta: deltaPct(current.adr, previous.adr) },
+    revpar: { value: current.revpar, previous: previous.revpar, delta: deltaPct(current.revpar, previous.revpar) },
+    alos: { value: current.alos, previous: previous.alos, delta: deltaPct(current.alos, previous.alos) },
+    room_revenue: { value: current.room_revenue, previous: previous.room_revenue, delta: deltaPct(current.room_revenue, previous.room_revenue) },
+    cancel_rate: { value: current.cancel_rate, previous: previous.cancel_rate, delta: deltaPct(current.cancel_rate, previous.cancel_rate) },
+    avg_stay_value: { value: current.avg_stay_value, previous: previous.avg_stay_value, delta: deltaPct(current.avg_stay_value, previous.avg_stay_value) },
+    repeat_rate: { value: current.repeat_rate, previous: previous.repeat_rate, delta: deltaPct(current.repeat_rate, previous.repeat_rate) },
+    arrivals: { value: current.arrivals, previous: previous.arrivals, delta: deltaPct(current.arrivals, previous.arrivals) },
+    departures: { value: current.departures, previous: previous.departures, delta: deltaPct(current.departures, previous.departures) },
+    guests: { value: current.guests, previous: previous.guests, delta: deltaPct(current.guests, previous.guests) },
+  }
+  const recognized = currentRows.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const alloc = {
+    nights: (b) => overlapNights(b.check_in, b.check_out, from, to),
+    revenue: (b) => {
+      const stay = stayNights(b.check_in, b.check_out)
+      const overlap = overlapNights(b.check_in, b.check_out, from, to)
+      return stay ? (Number(b.total_price || 0) * overlap) / stay : 0
+    },
+  }
+  const [ops, loyalty, satisfaction, surveyQueue, pos, expenses] = await Promise.all([
+    pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM rooms) AS rooms,
+         (SELECT COUNT(*)::int FROM rooms WHERE status = 'available') AS available,
+         (SELECT COUNT(*)::int FROM rooms WHERE status = 'maintenance') AS maintenance,
+         (SELECT COUNT(*)::int FROM housekeeping_tasks WHERE status IN ('dirty', 'in_progress')) AS dirty,
+         (SELECT COUNT(*)::int FROM maintenance_requests WHERE status IN ('open', 'assigned', 'in_progress', 'on_hold')) AS work_orders,
+         (SELECT COUNT(*)::int FROM bookings WHERE status = 'confirmed' AND check_in <= CURRENT_DATE AND check_out > CURRENT_DATE) AS in_house,
+         (SELECT COUNT(*)::int FROM bookings WHERE status = 'pending') AS pending`
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS members,
+              COUNT(*) FILTER (WHERE vip_status <> 'regular')::int AS vip
+       FROM guest_profiles`
+    ).catch(() => ({ rows: [{ members: 0, vip: 0 }] })),
+    pool.query(
+      `SELECT COUNT(*)::int AS responses,
+              COALESCE(AVG(overall_rating), 0) AS overall,
+              COALESCE(AVG(cleanliness_rating), 0) AS cleanliness,
+              COALESCE(AVG(service_rating), 0) AS service,
+              COUNT(*) FILTER (WHERE would_recommend) * 100.0 / NULLIF(COUNT(*), 0) AS recommend_rate
+       FROM guest_satisfaction s
+       JOIN bookings b ON b.id = s.booking_id
+       WHERE b.check_out > $1::date AND b.check_in <= $2::date`,
+      [from, to]
+    ),
+    pool.query(
+      `SELECT b.id, u.username, r.name AS room_name, to_char(b.check_out, 'YYYY-MM-DD') AS check_out, b.total_price
+       FROM bookings b
+       JOIN users u ON u.id = b.user_id
+       JOIN rooms r ON r.id = b.room_id
+       WHERE b.status = 'completed'
+         AND NOT EXISTS (SELECT 1 FROM guest_satisfaction s WHERE s.booking_id = b.id)
+       ORDER BY b.check_out DESC
+       LIMIT 40`
+    ),
+    pool.query(
+      `SELECT COALESCE(SUM(total_amount), 0) AS total
+       FROM pos_transactions
+       WHERE status = 'paid' AND created_at::date BETWEEN $1::date AND $2::date`,
+      [from, to]
+    ).catch(() => ({ rows: [{ total: 0 }] })),
+    pool.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total
+       FROM expenses
+       WHERE expense_date BETWEEN $1::date AND $2::date`,
+      [from, to]
+    ).catch(() => ({ rows: [{ total: 0 }] })),
+  ])
+  const sat = satisfaction.rows[0] || {}
+  const posTotal = Number(pos.rows[0]?.total || 0)
+  const expenseTotal = Number(expenses.rows[0]?.total || 0)
+  const revenue = current.room_revenue + posTotal
+  const profit = revenue - expenseTotal
+  return {
+    range: { from, to, previous_from: prevFrom, previous_to: prevTo },
+    kpis,
+    totals: current,
+    profit: { revenue, pos: posTotal, expenses: expenseTotal, profit, margin: revenue ? (profit / revenue) * 100 : 0 },
+    operations: ops.rows[0] || {},
+    loyalty: loyalty.rows[0] || { members: 0, vip: 0 },
+    satisfaction: {
+      responses: Number(sat.responses || 0),
+      overall: Number(sat.overall || 0),
+      cleanliness: Number(sat.cleanliness || 0),
+      service: Number(sat.service || 0),
+      recommend_rate: Number(sat.recommend_rate || 0),
+      queue: surveyQueue.rows,
+    },
+    daily: buildDaily(currentRows, roomCount, from, to),
+    properties: groupTotals(recognized, 'hotel_name', alloc),
+    channels: groupTotals(recognized, 'channel_name', alloc),
+    rooms: groupTotals(recognized, 'room_name', alloc).slice(0, 8),
+    bookings: currentRows.map((b) => ({
+      id: b.id,
+      username: b.username,
+      room_name: b.room_name,
+      hotel_name: b.hotel_name,
+      channel_name: b.channel_name,
+      check_in: b.check_in,
+      check_out: b.check_out,
+      total_price: b.total_price,
+      status: b.status,
+    })),
+  }
+}
+
+app.get('/api/analytics', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { from, to } = parseAnalyticsRange(req.query)
+    res.json(await buildAnalytics(from, to))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/analytics/satisfaction', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { booking_id, overall_rating, cleanliness_rating, service_rating, feedback, would_recommend } = req.body || {}
+    if (!booking_id) return res.status(400).json({ error: 'Select a completed stay.' })
+    const overall = Number(overall_rating)
+    if (!Number.isFinite(overall) || overall < 1 || overall > 5) {
+      return res.status(400).json({ error: 'Overall rating must be between 1 and 5.' })
+    }
+    const booking = await pool.query(
+      `SELECT id, user_id, status FROM bookings WHERE id = $1`,
+      [booking_id]
+    )
+    if (!booking.rows[0]) return res.status(404).json({ error: 'Booking not found.' })
+    if (booking.rows[0].status !== 'completed') {
+      return res.status(400).json({ error: 'Surveys can be logged after the stay is completed.' })
+    }
+    const clean = cleanliness_rating == null || cleanliness_rating === '' ? null : Number(cleanliness_rating)
+    const service = service_rating == null || service_rating === '' ? null : Number(service_rating)
+    const r = await pool.query(
+      `INSERT INTO guest_satisfaction (booking_id, user_id, overall_rating, cleanliness_rating, service_rating, feedback, would_recommend)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        booking_id,
+        booking.rows[0].user_id,
+        overall,
+        Number.isFinite(clean) ? clean : null,
+        Number.isFinite(service) ? service : null,
+        String(feedback || '').trim() || null,
+        Boolean(would_recommend),
+      ]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'guest_satisfaction',
+      entityId: r.rows[0].id,
+      summary: `Logged ${overall}/5 survey for booking #${booking_id}`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'This stay already has a survey.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 pool.query('SELECT 1').then(async () => {
@@ -3158,9 +4090,11 @@ pool.query('SELECT 1').then(async () => {
   await ensureGalleryColumns()
   await ensureFinanceTables()
   await ensureHrTables()
+  await ensureMaintenanceTables()
   await ensureHousekeepingTables()
   await ensurePayrollExpenseLink()
   await ensureGuestTables()
+  await ensureAnalyticsTables()
   await ensureAuditTable()
   await ensureUserSecurity()
   app.listen(PORT, () => {

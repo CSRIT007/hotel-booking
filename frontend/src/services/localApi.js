@@ -624,3 +624,122 @@ export async function createCrmCommunication(payload) {
     throwApiError(e, 'Failed to send message')
   }
 }
+
+export async function getMaintenanceRequests() {
+  const { data } = await client.get('/api/maintenance/requests')
+  return data || { requests: [], rooms: [], staff: [] }
+}
+
+export async function createMaintenanceRequest(payload) {
+  try {
+    const { data } = await client.post('/api/maintenance/requests', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to open work order')
+  }
+}
+
+export async function updateMaintenanceRequest(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/maintenance/requests/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update work order')
+  }
+}
+
+export async function deleteMaintenanceRequest(id) {
+  try {
+    const { data } = await client.delete(`/api/maintenance/requests/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete work order')
+  }
+}
+
+export async function getMaintenanceSchedule() {
+  const { data } = await client.get('/api/maintenance/schedule')
+  return data || { schedules: [], rooms: [], staff: [] }
+}
+
+export async function createMaintenanceSchedule(payload) {
+  try {
+    const { data } = await client.post('/api/maintenance/schedule', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to save schedule')
+  }
+}
+
+export async function updateMaintenanceSchedule(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/maintenance/schedule/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update schedule')
+  }
+}
+
+export async function logMaintenanceService(id) {
+  try {
+    const { data } = await client.post(`/api/maintenance/schedule/${id}/service`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to log service')
+  }
+}
+
+export async function deleteMaintenanceSchedule(id) {
+  try {
+    const { data } = await client.delete(`/api/maintenance/schedule/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete schedule')
+  }
+}
+
+export async function getMaintenanceInventory() {
+  const { data } = await client.get('/api/maintenance/inventory')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createMaintenancePart(payload) {
+  try {
+    const { data } = await client.post('/api/maintenance/inventory', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add part')
+  }
+}
+
+export async function updateMaintenancePart(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/maintenance/inventory/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update stock')
+  }
+}
+
+export async function deleteMaintenancePart(id) {
+  try {
+    const { data } = await client.delete(`/api/maintenance/inventory/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove part')
+  }
+}
+
+export async function getAnalytics(params = {}) {
+  const { data } = await client.get('/api/analytics', { params })
+  return data || {}
+}
+
+export async function createGuestSatisfaction(payload) {
+  try {
+    const { data } = await client.post('/api/analytics/satisfaction', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to save survey')
+  }
+}
