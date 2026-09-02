@@ -4,29 +4,14 @@
     <p class="mt-1 text-stone-600">Summary of bookings, revenue and rooms.</p>
 
     <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <router-link to="/admin/properties" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Properties
-        <span class="mt-1 block text-xs font-normal text-stone-500">Add or remove hotels</span>
-      </router-link>
-      <router-link to="/admin/rooms" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Rooms
-        <span class="mt-1 block text-xs font-normal text-stone-500">Add or remove rooms</span>
-      </router-link>
-      <router-link to="/admin/contacts" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Messages
-        <span class="mt-1 block text-xs font-normal text-stone-500">Guest contact inbox</span>
-      </router-link>
-      <router-link to="/admin/users" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Users
-        <span class="mt-1 block text-xs font-normal text-stone-500">Staff and guest accounts</span>
-      </router-link>
-      <router-link to="/admin/audit-log" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Audit log
-        <span class="mt-1 block text-xs font-normal text-stone-500">Who changed what</span>
-      </router-link>
-      <router-link to="/admin/security" class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700">
-        Security
-        <span class="mt-1 block text-xs font-normal text-stone-500">Locks and protections</span>
+      <router-link
+        v-for="item in shortcutItems"
+        :key="item.to"
+        :to="item.to"
+        class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700"
+      >
+        {{ item.label }}
+        <span class="mt-1 block text-xs font-normal text-stone-500">{{ item.hint }}</span>
       </router-link>
     </div>
 
@@ -56,23 +41,26 @@
       </div>
     </div>
 
-    <!-- Bookings by status (simple bar chart) -->
+    <!-- Bookings by status -->
     <div class="mt-8 rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
       <h2 class="font-semibold text-stone-800">Bookings by status</h2>
-      <div class="mt-4 flex flex-wrap items-end gap-4">
-        <div v-for="(n, status) in counts" :key="status" class="flex flex-col items-center">
-          <div
-            class="w-16 rounded-t bg-stone-200 transition-all"
-            :class="{
-              'bg-amber-400': status === 'pending',
-              'bg-green-500': status === 'confirmed' || status === 'completed',
-              'bg-red-400': status === 'cancelled',
-            }"
-            :style="{ height: totalBookings ? (n / totalBookings) * 120 + 24 : 24 }"
-          />
-          <span class="mt-2 text-xs font-medium text-stone-600">{{ status }}</span>
-          <span class="text-sm font-semibold text-stone-800">{{ n }}</span>
-        </div>
+      <div class="mt-5 space-y-4">
+        <router-link
+          v-for="row in statusBars"
+          :key="row.key"
+          :to="`/admin/bookings?status=${row.key}`"
+          class="grid grid-cols-[7.5rem_minmax(0,1fr)_2.5rem] items-center gap-3 sm:grid-cols-[8.5rem_minmax(0,1fr)_3rem]"
+        >
+          <span class="text-sm font-medium capitalize text-stone-700">{{ row.label }}</span>
+          <div class="h-8 w-full overflow-hidden rounded-full bg-stone-100">
+            <div
+              class="h-full rounded-full transition-all"
+              :class="row.bar"
+              :style="{ width: row.pct + '%' }"
+            />
+          </div>
+          <span class="text-right text-sm font-semibold text-stone-800">{{ row.count }}</span>
+        </router-link>
       </div>
     </div>
 
@@ -121,24 +109,20 @@
 
     <div class="mt-8 rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
       <h2 class="font-semibold text-stone-800">Quick links</h2>
-      <ul class="mt-3 flex flex-wrap gap-4 text-sm">
-        <li><router-link to="/admin/bookings" class="text-brand-600 hover:underline">Bookings</router-link></li>
-        <li><router-link to="/admin/properties" class="text-brand-600 hover:underline">Properties</router-link></li>
-        <li><router-link to="/admin/rooms" class="text-brand-600 hover:underline">Rooms</router-link></li>
-        <li><router-link to="/admin/guests" class="text-brand-600 hover:underline">Guests</router-link></li>
-        <li><router-link to="/admin/contacts" class="text-brand-600 hover:underline">Messages</router-link></li>
-        <li><router-link to="/admin/audit-log" class="text-brand-600 hover:underline">Audit log</router-link></li>
-        <li><router-link to="/admin/users" class="text-brand-600 hover:underline">Users</router-link></li>
-        <li><router-link to="/admin/security" class="text-brand-600 hover:underline">Security</router-link></li>
-        <li><router-link to="/admin/finance-revenue" class="text-brand-600 hover:underline">Revenue</router-link></li>
-        <li><router-link to="/admin/finance-expense" class="text-brand-600 hover:underline">Expenses</router-link></li>
-        <li><router-link to="/admin/finance-profit" class="text-brand-600 hover:underline">Profit</router-link></li>
-        <li><router-link to="/admin/hr-employees" class="text-brand-600 hover:underline">Employee information</router-link></li>
-        <li><router-link to="/admin/hr-org" class="text-brand-600 hover:underline">Departments</router-link></li>
-        <li><router-link to="/admin/hr-schedules" class="text-brand-600 hover:underline">Schedules</router-link></li>
-        <li><router-link to="/admin/hr-payroll" class="text-brand-600 hover:underline">Payroll</router-link></li>
-        <li><router-link to="/admin/hr-leaves" class="text-brand-600 hover:underline">Leaves</router-link></li>
-      </ul>
+      <div class="mt-3 space-y-3 text-sm">
+        <div
+          v-for="(row, i) in quickLinkRows"
+          :key="i"
+          class="flex justify-between gap-x-3"
+        >
+          <router-link
+            v-for="link in row"
+            :key="link.to"
+            :to="link.to"
+            class="shrink-0 whitespace-nowrap text-brand-600 hover:underline"
+          >{{ link.label }}</router-link>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -154,6 +138,49 @@ const bookings = ref([])
 const rooms = ref([])
 const loading = ref(true)
 
+const shortcutItems = [
+  { to: '/admin/properties', label: 'Properties', hint: 'Add or remove hotels' },
+  { to: '/admin/bookings', label: 'Bookings', hint: 'Guest stays and requests' },
+  { to: '/admin/hr-employees', label: 'Employee information', hint: 'Staff directory and positions' },
+  { to: '/admin/maintenance-requests', label: 'Requests', hint: 'Repair and work orders' },
+  { to: '/admin/analytics-kpi', label: 'KPI', hint: 'Performance indicators' },
+  { to: '/admin/audit-log', label: 'Audit log', hint: 'Who changed what' },
+  { to: '/admin/security', label: 'Security', hint: 'Locks and protections' },
+  { to: '/admin/contacts', label: 'Messages', hint: 'Guest contact inbox' },
+]
+
+const quickLinks = [
+  { to: '/admin/properties', label: 'Properties' },
+  { to: '/admin/rooms', label: 'Rooms' },
+  { to: '/admin/bookings', label: 'Bookings' },
+  { to: '/admin/guests', label: 'Guests' },
+  { to: '/admin/housekeeping', label: 'Housekeeping' },
+  { to: '/admin/pos-sales', label: 'Sales' },
+  { to: '/admin/crs-rates', label: 'Rates' },
+  { to: '/admin/crm-campaigns', label: 'Campaigns' },
+  { to: '/admin/crm-loyalty', label: 'Loyalty' },
+  { to: '/admin/crm-communications', label: 'Communications' },
+  { to: '/admin/finance-revenue', label: 'Revenue' },
+  { to: '/admin/finance-expense', label: 'Expenses' },
+  { to: '/admin/finance-profit', label: 'Profit' },
+  { to: '/admin/hr-employees', label: 'Employee information' },
+  { to: '/admin/hr-org', label: 'Departments' },
+  { to: '/admin/hr-schedules', label: 'Schedules' },
+  { to: '/admin/hr-payroll', label: 'Payroll' },
+  { to: '/admin/hr-leaves', label: 'Leaves' },
+  { to: '/admin/maintenance-requests', label: 'Requests' },
+  { to: '/admin/analytics-kpi', label: 'KPI' },
+  { to: '/admin/users', label: 'Users' },
+  { to: '/admin/audit-log', label: 'Audit log' },
+  { to: '/admin/security', label: 'Security' },
+  { to: '/admin/contacts', label: 'Messages' },
+]
+
+const quickLinkRows = computed(() => {
+  const mid = Math.ceil(quickLinks.length / 2)
+  return [quickLinks.slice(0, mid), quickLinks.slice(mid)]
+})
+
 const counts = computed(() => {
   const c = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 }
   bookings.value.forEach((b) => {
@@ -162,7 +189,18 @@ const counts = computed(() => {
   return c
 })
 
-const totalBookings = computed(() => bookings.value.length)
+const statusBars = computed(() => {
+  const max = Math.max(counts.value.pending, counts.value.confirmed, counts.value.cancelled, counts.value.completed, 1)
+  return [
+    { key: 'pending', label: 'Pending', bar: 'bg-amber-400' },
+    { key: 'confirmed', label: 'Confirmed', bar: 'bg-green-500' },
+    { key: 'cancelled', label: 'Cancelled', bar: 'bg-red-400' },
+    { key: 'completed', label: 'Completed', bar: 'bg-emerald-600' },
+  ].map((row) => {
+    const count = counts.value[row.key]
+    return { ...row, count, pct: Math.round((count / max) * 100) }
+  })
+})
 
 const totalRevenue = computed(() => {
   return bookings.value
@@ -176,7 +214,7 @@ const roomCounts = computed(() => {
   return { total, available }
 })
 
-const recentBookings = computed(() => bookings.value.slice(0, 10))
+const recentBookings = computed(() => bookings.value.slice(0, 5))
 
 onMounted(async () => {
   loading.value = true

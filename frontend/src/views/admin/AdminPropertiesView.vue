@@ -24,13 +24,7 @@
             <label class="block text-xs font-medium text-stone-700">Description</label>
             <textarea v-model="form.description" rows="3" class="field" :disabled="saving" placeholder="Short description for the website" />
           </div>
-          <div>
-            <label class="block text-xs font-medium text-stone-700">Photo</label>
-            <select v-model="form.image" class="field" :disabled="saving">
-              <option v-for="img in PROPERTY_IMAGES" :key="img.value" :value="img.value">{{ img.label }}</option>
-            </select>
-            <div class="mt-2 h-28 rounded-lg bg-stone-200 bg-cover bg-center" :style="{ backgroundImage: `url(${form.image})` }" />
-          </div>
+          <AdminPhotoFields v-model:image="form.image" v-model:images="form.images" :stock="PROPERTY_IMAGES" :disabled="saving" />
         </div>
         <p v-if="formError" class="mt-3 text-sm text-red-600">{{ formError }}</p>
         <p v-if="formSuccess" class="mt-3 text-sm text-green-600">{{ formSuccess }}</p>
@@ -79,6 +73,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { createHotel, deleteHotel, getHotels, updateHotel } from '../../services/data'
 import { PROPERTY_IMAGES } from '../../constants/media'
 import ConfirmModal from '../../components/ConfirmModal.vue'
+import AdminPhotoFields from '../../components/AdminPhotoFields.vue'
 
 const hotels = ref([])
 const loading = ref(true)
@@ -93,6 +88,7 @@ const form = reactive({
   location: '',
   description: '',
   image: PROPERTY_IMAGES[0].value,
+  images: [],
 })
 
 function resetForm() {
@@ -101,6 +97,7 @@ function resetForm() {
   form.location = ''
   form.description = ''
   form.image = PROPERTY_IMAGES[0].value
+  form.images = []
   formError.value = ''
 }
 
@@ -110,6 +107,7 @@ function edit(h) {
   form.location = h.location || ''
   form.description = h.description || ''
   form.image = h.image || PROPERTY_IMAGES[0].value
+  form.images = Array.isArray(h.images) ? [...h.images] : []
   formError.value = ''
   formSuccess.value = ''
 }
@@ -134,6 +132,7 @@ async function save() {
       location: form.location.trim(),
       description: form.description.trim(),
       image: form.image,
+      images: form.images,
     }
     if (editingId.value) await updateHotel(editingId.value, payload)
     else await createHotel(payload)

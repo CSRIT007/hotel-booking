@@ -51,9 +51,9 @@
             <span>{{ openGroup === 'crs' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'crs'" class="admin-sub">
-            <router-link to="/admin/crs-rates" class="admin-sub-link">Rates</router-link>
-            <router-link to="/admin/crs-channels" class="admin-sub-link">Channels</router-link>
-            <router-link to="/admin/crs-availability" class="admin-sub-link">Availability</router-link>
+            <router-link to="/admin/crs-rates" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-rates') }">Rates</router-link>
+            <router-link to="/admin/crs-channels" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-channels') }">Channels</router-link>
+            <router-link to="/admin/crs-availability" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-availability') }">Availability</router-link>
           </div>
         </div>
 
@@ -63,9 +63,9 @@
             <span>{{ openGroup === 'crm' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'crm'" class="admin-sub">
-            <router-link to="/admin/crm-campaigns" class="admin-sub-link">Campaigns</router-link>
-            <router-link to="/admin/crm-loyalty" class="admin-sub-link">Loyalty</router-link>
-            <router-link to="/admin/crm-communications" class="admin-sub-link">Communications</router-link>
+            <router-link to="/admin/crm-campaigns" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crm-campaigns') }">Campaigns</router-link>
+            <router-link to="/admin/crm-loyalty" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crm-loyalty') }">Loyalty</router-link>
+            <router-link to="/admin/crm-communications" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crm-communications') }">Communications</router-link>
           </div>
         </div>
 

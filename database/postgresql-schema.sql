@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS hotels (
     description TEXT,
     location VARCHAR(100) NOT NULL,
     image VARCHAR(255),
+    images JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     beds INT NOT NULL DEFAULT 1,
     image VARCHAR(255),
     status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'booked', 'maintenance')),
+    images JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_rooms_hotel ON rooms(hotel_id);

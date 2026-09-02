@@ -60,7 +60,8 @@ const loading = ref(true)
 async function load() {
   loading.value = true
   const hotelId = route.query.hotel
-  rooms.value = await getRooms(hotelId ? { hotel_id: hotelId, status: 'available' } : { status: 'available' })
+  rooms.value = await getRooms(hotelId ? { hotel_id: hotelId } : {})
+  rooms.value = rooms.value.filter((r) => r.status !== 'maintenance')
   loading.value = false
 }
 

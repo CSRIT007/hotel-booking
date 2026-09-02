@@ -10,7 +10,9 @@ import pg from 'pg'
 import bcrypt from 'bcrypt'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync } from 'fs'
+import crypto from 'crypto'
+import multer from 'multer'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -34,7 +36,7 @@ const pool = new pg.Pool({
 
 const app = express()
 app.set('trust proxy', true)
-app.use(express.json())
+app.use(express.json({ limit: '2mb' }))
 app.use((_req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*')
   res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
@@ -43,10 +45,53 @@ app.use((_req, res, next) => {
 })
 app.options('*', (_req, res) => res.sendStatus(204))
 
+const uploadsDir = join(__dirname, 'uploads')
+mkdirSync(uploadsDir, { recursive: true })
+app.use('/uploads', express.static(uploadsDir))
+
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (_req, file, cb) => {
+      const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[file.mimetype] || '.jpg'
+      cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`)
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) cb(null, true)
+    else cb(new Error('Use a JPG, PNG, WebP, or GIF photo.'))
+  },
+})
+
 function ensureImagePath(path) {
   if (!path || typeof path !== 'string') return path
   if (path.startsWith('http')) return path
   return path.startsWith('/') ? path : `/${path}`
+}
+
+function normalizeGallery(value) {
+  if (!value) return []
+  let list = value
+  if (typeof list === 'string') {
+    try {
+      list = JSON.parse(list)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(list)) return []
+  return [...new Set(list.map(ensureImagePath).filter(Boolean))]
+}
+
+function withMedia(row) {
+  if (!row) return row
+  return { ...row, image: ensureImagePath(row.image), images: normalizeGallery(row.images) }
+}
+
+async function ensureGalleryColumns() {
+  await pool.query(`ALTER TABLE hotels ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`)
+  await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`)
 }
 
 function normalizeIp(value) {
@@ -261,6 +306,7 @@ app.post('/api/auth/register', async (req, res) => {
       [username, email, hash, 'guest']
     )
     const u = ins.rows[0]
+    await ensureGuestProfile(u.id)
     await writeAudit(req, {
       action: 'register',
       entity: 'user',
@@ -275,11 +321,19 @@ app.post('/api/auth/register', async (req, res) => {
 })
 
 // ----- Data -----
+app.post('/api/upload', (req, res) => {
+  if (!requireStaff(req, res)) return
+  imageUpload.single('file')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Upload failed.' })
+    if (!req.file) return res.status(400).json({ error: 'Choose a photo to upload.' })
+    res.status(201).json({ url: `/uploads/${req.file.filename}` })
+  })
+})
+
 app.get('/api/hotels', async (_req, res) => {
   try {
-    const r = await pool.query('SELECT id, name, description, location, image FROM hotels ORDER BY id')
-    const list = r.rows.map((row) => ({ ...row, image: ensureImagePath(row.image) }))
-    res.json(list)
+    const r = await pool.query('SELECT id, name, description, location, image, images FROM hotels ORDER BY id')
+    res.json(r.rows.map(withMedia))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -305,8 +359,7 @@ app.get('/api/rooms', async (req, res) => {
     const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : ''
     const query = 'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id' + where + ' ORDER BY r.id'
     const r = await pool.query(query, params)
-    const list = r.rows.map((row) => ({ ...row, image: ensureImagePath(row.image) }))
-    res.json(list)
+    res.json(r.rows.map(withMedia))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -320,7 +373,7 @@ app.get('/api/rooms/:id', async (req, res) => {
     )
     const row = r.rows[0]
     if (!row) return res.status(404).json({ error: 'Room not found' })
-    res.json({ ...row, image: ensureImagePath(row.image) })
+    res.json(withMedia(row))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -328,13 +381,14 @@ app.get('/api/rooms/:id', async (req, res) => {
 
 app.post('/api/hotels', async (req, res) => {
   try {
-    const { name, description, location, image } = req.body || {}
+    const { name, description, location, image, images } = req.body || {}
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'Property name is required.' })
     if (!location || !String(location).trim()) return res.status(400).json({ error: 'Location is required.' })
+    const gallery = JSON.stringify(normalizeGallery(images))
     const r = await pool.query(
-      `INSERT INTO hotels (name, description, location, image)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [String(name).trim(), description || '', String(location).trim(), image || null]
+      `INSERT INTO hotels (name, description, location, image, images)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [String(name).trim(), description || '', String(location).trim(), image || null, gallery]
     )
     const row = r.rows[0]
     await writeAudit(req, {
@@ -343,7 +397,7 @@ app.post('/api/hotels', async (req, res) => {
       entityId: row.id,
       summary: `Added property “${row.name}”`,
     })
-    res.status(201).json({ ...row, image: ensureImagePath(row.image) })
+    res.status(201).json(withMedia(row))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -351,7 +405,7 @@ app.post('/api/hotels', async (req, res) => {
 
 app.patch('/api/hotels/:id', async (req, res) => {
   try {
-    const { name, description, location, image } = req.body || {}
+    const { name, description, location, image, images } = req.body || {}
     const current = await pool.query('SELECT * FROM hotels WHERE id = $1', [req.params.id])
     if (!current.rows[0]) return res.status(404).json({ error: 'Property not found' })
     const row = current.rows[0]
@@ -359,9 +413,10 @@ app.patch('/api/hotels/:id', async (req, res) => {
     const nextLocation = location != null ? String(location).trim() : row.location
     if (!nextName) return res.status(400).json({ error: 'Property name is required.' })
     if (!nextLocation) return res.status(400).json({ error: 'Location is required.' })
+    const nextImages = images != null ? JSON.stringify(normalizeGallery(images)) : JSON.stringify(normalizeGallery(row.images))
     const r = await pool.query(
-      `UPDATE hotels SET name = $1, description = $2, location = $3, image = $4 WHERE id = $5 RETURNING *`,
-      [nextName, description != null ? description : row.description, nextLocation, image != null ? image : row.image, req.params.id]
+      `UPDATE hotels SET name = $1, description = $2, location = $3, image = $4, images = $5 WHERE id = $6 RETURNING *`,
+      [nextName, description != null ? description : row.description, nextLocation, image != null ? image : row.image, nextImages, req.params.id]
     )
     await writeAudit(req, {
       action: 'update',
@@ -369,7 +424,7 @@ app.patch('/api/hotels/:id', async (req, res) => {
       entityId: r.rows[0].id,
       summary: `Updated property “${r.rows[0].name}”`,
     })
-    res.json({ ...r.rows[0], image: ensureImagePath(r.rows[0].image) })
+    res.json(withMedia(r.rows[0]))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -393,16 +448,17 @@ app.delete('/api/hotels/:id', async (req, res) => {
 
 app.post('/api/rooms', async (req, res) => {
   try {
-    const { hotel_id, name, description, price, max_persons, size, view_type, beds, image, status } = req.body || {}
+    const { hotel_id, name, description, price, max_persons, size, view_type, beds, image, images, status } = req.body || {}
     if (!hotel_id) return res.status(400).json({ error: 'Select a property first.' })
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'Room name is required.' })
     if (price == null || Number(price) < 0) return res.status(400).json({ error: 'Price is required.' })
     const hotel = await pool.query('SELECT id FROM hotels WHERE id = $1', [hotel_id])
     if (!hotel.rows[0]) return res.status(400).json({ error: 'Property not found. Add a property first.' })
     const roomStatus = ['available', 'booked', 'maintenance'].includes(status) ? status : 'available'
+    const gallery = JSON.stringify(normalizeGallery(images))
     const r = await pool.query(
-      `INSERT INTO rooms (hotel_id, name, description, price, max_persons, size, view_type, beds, image, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      `INSERT INTO rooms (hotel_id, name, description, price, max_persons, size, view_type, beds, image, status, images)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [
         hotel_id,
         String(name).trim(),
@@ -414,6 +470,7 @@ app.post('/api/rooms', async (req, res) => {
         parseInt(beds, 10) || 1,
         image || null,
         roomStatus,
+        gallery,
       ]
     )
     const details = await pool.query(
@@ -427,7 +484,7 @@ app.post('/api/rooms', async (req, res) => {
       entityId: created.id,
       summary: `Added room “${created.name}” at ${created.hotel_name}`,
     })
-    res.status(201).json({ ...created, image: ensureImagePath(created.image) })
+    res.status(201).json(withMedia(created))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -445,11 +502,12 @@ app.patch('/api/rooms/:id', async (req, res) => {
     const nextName = body.name != null ? String(body.name).trim() : row.name
     if (!nextName) return res.status(400).json({ error: 'Room name is required.' })
     const nextStatus = body.status && ['available', 'booked', 'maintenance'].includes(body.status) ? body.status : row.status
+    const nextImages = body.images != null ? JSON.stringify(normalizeGallery(body.images)) : JSON.stringify(normalizeGallery(row.images))
     const r = await pool.query(
       `UPDATE rooms
        SET hotel_id = $1, name = $2, description = $3, price = $4, max_persons = $5,
-           size = $6, view_type = $7, beds = $8, image = $9, status = $10
-       WHERE id = $11 RETURNING *`,
+           size = $6, view_type = $7, beds = $8, image = $9, status = $10, images = $11
+       WHERE id = $12 RETURNING *`,
       [
         hotelId,
         nextName,
@@ -461,6 +519,7 @@ app.patch('/api/rooms/:id', async (req, res) => {
         body.beds != null ? parseInt(body.beds, 10) : row.beds,
         body.image != null ? body.image : row.image,
         nextStatus,
+        nextImages,
         req.params.id,
       ]
     )
@@ -475,7 +534,7 @@ app.patch('/api/rooms/:id', async (req, res) => {
       entityId: updated.id,
       summary: `Updated room “${updated.name}” (${updated.status})`,
     })
-    res.json({ ...updated, image: ensureImagePath(updated.image) })
+    res.json(withMedia(updated))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -518,10 +577,11 @@ app.get('/api/bookings', async (req, res) => {
                 to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
                 b.guests, b.total_price, b.status, b.created_at,
                 r.name AS room_name, r.image AS room_image,
-                h.name AS hotel_name
+                h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
          FROM bookings b
          JOIN rooms r ON b.room_id = r.id
          JOIN hotels h ON r.hotel_id = h.id
+         LEFT JOIN crs_channels c ON c.id = b.channel_id
          WHERE b.user_id = $1
          ORDER BY b.created_at DESC`,
         [userId]
@@ -534,11 +594,12 @@ app.get('/api/bookings', async (req, res) => {
         to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
         to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
         r.name AS room_name, r.price AS room_price,
-        h.name AS hotel_name
+        h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
        FROM bookings b
        JOIN users u ON b.user_id = u.id
        JOIN rooms r ON b.room_id = r.id
        JOIN hotels h ON r.hotel_id = h.id
+       LEFT JOIN crs_channels c ON c.id = b.channel_id
        ORDER BY b.created_at DESC`
     )
     res.json(r.rows)
@@ -583,6 +644,10 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
     if (status === 'confirmed') {
       await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1", [booking.room_id])
+    } else if (status === 'completed') {
+      await openCheckoutTask(booking.room_id, booking.id)
+      await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status <> 'maintenance'", [booking.room_id])
+      await awardStayPoints(booking)
     } else if (status === 'cancelled') {
       const other = await pool.query(
         `SELECT 1 FROM bookings
@@ -609,14 +674,27 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const { user_id, room_id, check_in, check_out, guests, total_price, status } = req.body || {}
-    if (!user_id || !room_id || !check_in || !check_out || total_price == null) {
+    const { user_id, room_id, check_in, check_out, guests, status, channel_id } = req.body || {}
+    if (!user_id || !room_id || !check_in || !check_out) {
       return res.status(400).json({ error: 'Missing required booking fields.' })
     }
+    const quote = await crsQuote(room_id, check_in, check_out)
+    if (quote.error) return res.status(400).json({ error: quote.error })
+    if (guests && quote.max_persons && Number(guests) > Number(quote.max_persons)) {
+      return res.status(400).json({ error: 'Guests exceed room capacity.' })
+    }
+    let channelId = channel_id ? parseInt(channel_id, 10) : null
+    if (channelId) {
+      const ch = await pool.query(`SELECT id FROM crs_channels WHERE id = $1 AND status = 'active'`, [channelId])
+      if (!ch.rows[0]) return res.status(400).json({ error: 'That booking channel is not active.' })
+    } else {
+      const direct = await pool.query(`SELECT id FROM crs_channels WHERE code = 'direct' LIMIT 1`)
+      channelId = direct.rows[0]?.id || null
+    }
     const r = await pool.query(
-      `INSERT INTO bookings (user_id, room_id, check_in, check_out, guests, total_price, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [user_id, room_id, check_in, check_out, guests || 1, total_price, status || 'pending']
+      `INSERT INTO bookings (user_id, room_id, check_in, check_out, guests, total_price, status, channel_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [user_id, room_id, check_in, check_out, guests || 1, quote.total, status || 'pending', channelId]
     )
     const created = r.rows[0]
     await writeAudit(req, {
@@ -2059,11 +2137,1028 @@ app.delete('/api/hr/leaves/:id', async (req, res) => {
   }
 })
 
+async function roomIsOccupied(roomId) {
+  const r = await pool.query(
+    `SELECT 1 FROM bookings
+     WHERE room_id = $1 AND status = 'confirmed'
+       AND check_in <= CURRENT_DATE AND check_out > CURRENT_DATE
+     LIMIT 1`,
+    [roomId]
+  )
+  return r.rows.length > 0
+}
+
+async function openCheckoutTask(roomId, bookingId = null) {
+  const existing = await pool.query(
+    `SELECT id FROM housekeeping_tasks WHERE room_id = $1 AND status IN ('dirty', 'in_progress') LIMIT 1`,
+    [roomId]
+  )
+  if (existing.rows[0]) return existing.rows[0]
+  const r = await pool.query(
+    `INSERT INTO housekeeping_tasks (room_id, booking_id, task_type, status, due_date)
+     VALUES ($1, $2, 'checkout', 'dirty', CURRENT_DATE)
+     RETURNING id`,
+    [roomId, bookingId]
+  )
+  await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status = 'available'", [roomId])
+  return r.rows[0]
+}
+
+async function releaseRoomIfReady(roomId) {
+  if (await roomIsOccupied(roomId)) return
+  const open = await pool.query(
+    `SELECT 1 FROM housekeeping_tasks WHERE room_id = $1 AND status IN ('dirty', 'in_progress') LIMIT 1`,
+    [roomId]
+  )
+  if (open.rows.length) return
+  await pool.query(
+    `UPDATE rooms SET status = 'available' WHERE id = $1 AND status = 'booked'`,
+    [roomId]
+  )
+}
+
+async function ensureHousekeepingTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS housekeeping_tasks (
+      id SERIAL PRIMARY KEY,
+      room_id INT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      booking_id INT REFERENCES bookings(id) ON DELETE SET NULL,
+      assigned_to INT REFERENCES hr_employees(id) ON DELETE SET NULL,
+      task_type VARCHAR(20) NOT NULL DEFAULT 'checkout' CHECK (task_type IN ('checkout', 'stayover', 'deep_clean')),
+      status VARCHAR(20) NOT NULL DEFAULT 'dirty' CHECK (status IN ('dirty', 'in_progress', 'clean')),
+      notes TEXT,
+      due_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hk_open_room
+    ON housekeeping_tasks(room_id)
+    WHERE status IN ('dirty', 'in_progress')
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_hk_status ON housekeeping_tasks(status)')
+  const due = await pool.query(`
+    SELECT b.id, b.room_id
+    FROM bookings b
+    WHERE b.status IN ('confirmed', 'completed')
+      AND b.check_out <= CURRENT_DATE
+      AND NOT EXISTS (
+        SELECT 1 FROM bookings x
+        WHERE x.room_id = b.room_id AND x.status = 'confirmed'
+          AND x.check_in <= CURRENT_DATE AND x.check_out > CURRENT_DATE
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM housekeeping_tasks t
+        WHERE t.room_id = b.room_id AND t.status IN ('dirty', 'in_progress')
+      )
+  `)
+  for (const row of due.rows) {
+    await openCheckoutTask(row.room_id, row.id)
+  }
+}
+
+function housekeepingBoardStatus(row) {
+  if (row.room_status === 'maintenance') return 'maintenance'
+  if (row.task_status === 'in_progress') return 'cleaning'
+  if (row.task_status === 'dirty') return 'dirty'
+  if (row.stay_booking_id) return 'occupied'
+  return 'ready'
+}
+
+app.get('/api/housekeeping', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    await openDueHousekeeping()
+    const rooms = await pool.query(`
+      SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status,
+             h.id AS hotel_id, h.name AS hotel_name,
+             t.id AS task_id, t.task_type, t.status AS task_status, t.assigned_to, t.notes,
+             to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
+             e.full_name AS assigned_name, e.employee_code AS assigned_code,
+             s.id AS stay_booking_id,
+             to_char(s.check_out, 'YYYY-MM-DD') AS stay_check_out
+      FROM rooms r
+      JOIN hotels h ON h.id = r.hotel_id
+      LEFT JOIN housekeeping_tasks t
+        ON t.room_id = r.id AND t.status IN ('dirty', 'in_progress')
+      LEFT JOIN hr_employees e ON e.id = t.assigned_to
+      LEFT JOIN bookings s
+        ON s.room_id = r.id AND s.status = 'confirmed'
+        AND s.check_in <= CURRENT_DATE AND s.check_out > CURRENT_DATE
+      ORDER BY h.name, r.name
+    `)
+    const staff = await pool.query(`
+      SELECT id, full_name, employee_code, department, position
+      FROM hr_employees
+      WHERE status = 'active'
+        AND (position ILIKE '%housekeeping%' OR department = 'Operation')
+      ORDER BY full_name
+    `)
+    res.json({
+      rooms: rooms.rows.map((row) => ({ ...row, hk_status: housekeepingBoardStatus(row) })),
+      staff: staff.rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+async function openDueHousekeeping() {
+  const due = await pool.query(`
+    SELECT b.id, b.room_id
+    FROM bookings b
+    WHERE b.status IN ('confirmed', 'completed')
+      AND b.check_out <= CURRENT_DATE
+      AND NOT EXISTS (
+        SELECT 1 FROM bookings x
+        WHERE x.room_id = b.room_id AND x.status = 'confirmed'
+          AND x.check_in <= CURRENT_DATE AND x.check_out > CURRENT_DATE
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM housekeeping_tasks t
+        WHERE t.room_id = b.room_id AND t.status IN ('dirty', 'in_progress')
+      )
+  `)
+  for (const row of due.rows) {
+    await openCheckoutTask(row.room_id, row.id)
+  }
+}
+
+app.post('/api/housekeeping', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { room_id, task_type, assigned_to, notes, due_date } = req.body || {}
+    if (!room_id) return res.status(400).json({ error: 'Select a room.' })
+    const room = await pool.query('SELECT id, name, status FROM rooms WHERE id = $1', [room_id])
+    if (!room.rows[0]) return res.status(404).json({ error: 'Room not found.' })
+    if (room.rows[0].status === 'maintenance') {
+      return res.status(400).json({ error: 'This room is in maintenance. Return it from Rooms first.' })
+    }
+    const type = ['checkout', 'stayover', 'deep_clean'].includes(task_type) ? task_type : 'checkout'
+    const occupied = await roomIsOccupied(room_id)
+    if (occupied && type === 'checkout') {
+      return res.status(400).json({ error: 'Guest is still in the room. Use stay-over clean, or check the guest out first.' })
+    }
+    const assignee = assigned_to ? parseInt(assigned_to, 10) : null
+    const r = await pool.query(
+      `INSERT INTO housekeeping_tasks (room_id, assigned_to, task_type, status, notes, due_date)
+       VALUES ($1, $2, $3, 'dirty', $4, $5)
+       RETURNING id`,
+      [room_id, assignee || null, type, notes || null, due_date || new Date().toISOString().slice(0, 10)]
+    )
+    if (!occupied) {
+      await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status = 'available'", [room_id])
+    }
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'housekeeping',
+      entityId: r.rows[0].id,
+      summary: `Housekeeping ${type} opened for “${room.rows[0].name}”`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'This room already has an open housekeeping task.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/housekeeping/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(
+      `SELECT t.*, r.name AS room_name
+       FROM housekeeping_tasks t JOIN rooms r ON r.id = t.room_id
+       WHERE t.id = $1`,
+      [req.params.id]
+    )
+    if (!current.rows[0]) return res.status(404).json({ error: 'Housekeeping task not found.' })
+    const row = current.rows[0]
+    if (row.status === 'clean') return res.status(400).json({ error: 'This task is already finished.' })
+    let assignedTo = row.assigned_to
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'assigned_to')) {
+      assignedTo = req.body.assigned_to ? parseInt(req.body.assigned_to, 10) : null
+    }
+    let nextStatus = row.status
+    if (req.body?.status) {
+      if (!['dirty', 'in_progress', 'clean'].includes(req.body.status)) {
+        return res.status(400).json({ error: 'Invalid housekeeping status.' })
+      }
+      if (req.body.status === 'in_progress' && row.status !== 'dirty' && row.status !== 'in_progress') {
+        return res.status(400).json({ error: 'Start cleaning from a dirty room.' })
+      }
+      if (req.body.status === 'clean' && !['dirty', 'in_progress'].includes(row.status)) {
+        return res.status(400).json({ error: 'Only an open task can be marked clean.' })
+      }
+      nextStatus = req.body.status
+    }
+    const notes = req.body?.notes != null ? req.body.notes : row.notes
+    const completedAt = nextStatus === 'clean' ? new Date() : null
+    await pool.query(
+      `UPDATE housekeeping_tasks
+       SET assigned_to = $1, status = $2, notes = $3, completed_at = $4
+       WHERE id = $5`,
+      [assignedTo, nextStatus, notes, completedAt, req.params.id]
+    )
+    if (nextStatus === 'clean') {
+      await releaseRoomIfReady(row.room_id)
+    }
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'housekeeping',
+      entityId: row.id,
+      summary: `Housekeeping for “${row.room_name}” marked ${nextStatus}`,
+    })
+    res.json({ ok: true, id: row.id, status: nextStatus })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+async function ensureCrsTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crs_channels (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(80) NOT NULL,
+      code VARCHAR(40) NOT NULL UNIQUE,
+      commission_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crs_rate_plans (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(80) NOT NULL,
+      hotel_id INT NOT NULL REFERENCES hotels(id) ON DELETE CASCADE,
+      room_id INT REFERENCES rooms(id) ON DELETE CASCADE,
+      price NUMERIC(10,2) NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      min_nights INT NOT NULL DEFAULT 1,
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused')),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      CHECK (end_date >= start_date),
+      CHECK (price >= 0),
+      CHECK (min_nights >= 1)
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_crs_rates_room ON crs_rate_plans(room_id, start_date, end_date)')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crs_stopsell (
+      id SERIAL PRIMARY KEY,
+      room_id INT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      reason TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      CHECK (end_date >= start_date)
+    )
+  `)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS channel_id INT REFERENCES crs_channels(id) ON DELETE SET NULL`)
+  await pool.query(`
+    INSERT INTO crs_channels (name, code, commission_pct, status) VALUES
+      ('Direct website', 'direct', 0, 'active'),
+      ('Walk-in', 'walkin', 0, 'active'),
+      ('Booking.com', 'booking', 15, 'active'),
+      ('Agoda', 'agoda', 15, 'active'),
+      ('Expedia', 'expedia', 18, 'active')
+    ON CONFLICT (code) DO NOTHING
+  `)
+  await pool.query(`
+    UPDATE bookings b SET channel_id = c.id
+    FROM crs_channels c
+    WHERE b.channel_id IS NULL AND c.code = 'direct'
+  `)
+}
+
+function ymd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function eachNight(checkIn, checkOut) {
+  const nights = []
+  const start = new Date(`${checkIn}T00:00:00`)
+  const end = new Date(`${checkOut}T00:00:00`)
+  if (!(start < end)) return nights
+  for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+    nights.push(ymd(new Date(d)))
+  }
+  return nights
+}
+
+async function nightlyRate(roomId, hotelId, date, fallbackPrice) {
+  const r = await pool.query(
+    `SELECT price FROM crs_rate_plans
+     WHERE status = 'active' AND start_date <= $1::date AND end_date >= $1::date
+       AND hotel_id = $2 AND (room_id = $3 OR room_id IS NULL)
+     ORDER BY CASE WHEN room_id IS NOT NULL THEN 0 ELSE 1 END, id DESC
+     LIMIT 1`,
+    [date, hotelId, roomId]
+  )
+  if (r.rows[0]) return Number(r.rows[0].price)
+  return Number(fallbackPrice || 0)
+}
+
+async function crsQuote(roomId, checkIn, checkOut) {
+  const room = await pool.query(
+    `SELECT r.id, r.price, r.status, r.hotel_id, r.name, r.max_persons, h.name AS hotel_name
+     FROM rooms r JOIN hotels h ON h.id = r.hotel_id WHERE r.id = $1`,
+    [roomId]
+  )
+  if (!room.rows[0]) return { error: 'Room not found.' }
+  const row = room.rows[0]
+  if (row.status === 'maintenance') return { error: 'This room is in maintenance and cannot be booked.' }
+  const nights = eachNight(checkIn, checkOut)
+  if (!nights.length) return { error: 'Check-out must be after check-in.' }
+  const overlap = await pool.query(
+    `SELECT id FROM bookings
+     WHERE room_id = $1 AND status IN ('pending', 'confirmed')
+       AND check_in < $3::date AND check_out > $2::date
+     LIMIT 1`,
+    [roomId, checkIn, checkOut]
+  )
+  if (overlap.rows[0]) return { error: 'Those dates are already reserved.' }
+  const closed = await pool.query(
+    `SELECT id FROM crs_stopsell
+     WHERE room_id = $1 AND start_date < $3::date AND end_date >= $2::date
+     LIMIT 1`,
+    [roomId, checkIn, checkOut]
+  )
+  if (closed.rows[0]) return { error: 'Those dates are closed for sale.' }
+  const nightly = []
+  let total = 0
+  for (const date of nights) {
+    const price = await nightlyRate(row.id, row.hotel_id, date, row.price)
+    nightly.push({ date, price })
+    total += price
+  }
+  return {
+    room_id: row.id,
+    room_name: row.name,
+    hotel_name: row.hotel_name,
+    max_persons: row.max_persons,
+    check_in: checkIn,
+    check_out: checkOut,
+    nights: nights.length,
+    nightly,
+    total: Math.round(total * 100) / 100,
+  }
+}
+
+app.get('/api/crs/quote', async (req, res) => {
+  try {
+    const roomId = parseInt(req.query.room_id, 10)
+    const { check_in, check_out } = req.query || {}
+    if (!roomId || !check_in || !check_out) return res.status(400).json({ error: 'Room and dates are required.' })
+    const quote = await crsQuote(roomId, check_in, check_out)
+    if (quote.error) return res.status(400).json({ error: quote.error })
+    res.json(quote)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/crs/rates', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT rp.id, rp.name, rp.hotel_id, rp.room_id, rp.price, rp.min_nights, rp.status,
+              to_char(rp.start_date, 'YYYY-MM-DD') AS start_date,
+              to_char(rp.end_date, 'YYYY-MM-DD') AS end_date,
+              h.name AS hotel_name, r.name AS room_name
+       FROM crs_rate_plans rp
+       JOIN hotels h ON h.id = rp.hotel_id
+       LEFT JOIN rooms r ON r.id = rp.room_id
+       ORDER BY rp.start_date DESC, rp.id DESC`
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crs/rates', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { name, hotel_id, room_id, price, start_date, end_date, min_nights, status } = req.body || {}
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Plan name is required.' })
+    if (!hotel_id) return res.status(400).json({ error: 'Select a property.' })
+    if (price == null || Number(price) < 0) return res.status(400).json({ error: 'Enter a nightly rate.' })
+    if (!start_date || !end_date || end_date < start_date) return res.status(400).json({ error: 'Enter a valid date range.' })
+    if (room_id) {
+      const room = await pool.query('SELECT hotel_id FROM rooms WHERE id = $1', [room_id])
+      if (!room.rows[0] || Number(room.rows[0].hotel_id) !== Number(hotel_id)) {
+        return res.status(400).json({ error: 'That room does not belong to the selected property.' })
+      }
+    }
+    const st = status === 'paused' ? 'paused' : 'active'
+    const r = await pool.query(
+      `INSERT INTO crs_rate_plans (name, hotel_id, room_id, price, start_date, end_date, min_nights, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [String(name).trim(), hotel_id, room_id || null, Number(price), start_date, end_date, parseInt(min_nights, 10) || 1, st]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'crs_rate',
+      entityId: r.rows[0].id,
+      summary: `CRS rate “${String(name).trim()}” opened`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/crs/rates/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM crs_rate_plans WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Rate plan not found.' })
+    const row = current.rows[0]
+    const st = req.body?.status === 'paused' || req.body?.status === 'active' ? req.body.status : row.status
+    await pool.query('UPDATE crs_rate_plans SET status = $1 WHERE id = $2', [st, req.params.id])
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'crs_rate',
+      entityId: row.id,
+      summary: `CRS rate “${row.name}” marked ${st}`,
+    })
+    res.json({ ok: true, id: row.id, status: st })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/crs/rates/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM crs_rate_plans WHERE id = $1 RETURNING id, name', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Rate plan not found.' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'crs_rate',
+      entityId: r.rows[0].id,
+      summary: `Deleted CRS rate “${r.rows[0].name}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/crs/channels', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT c.*,
+              (SELECT COUNT(*)::int FROM bookings b WHERE b.channel_id = c.id) AS booking_count
+       FROM crs_channels c
+       ORDER BY c.id`
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crs/channels', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { name, code, commission_pct, status } = req.body || {}
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Channel name is required.' })
+    const slug = String(code || name)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '')
+      .slice(0, 40)
+    if (!slug) return res.status(400).json({ error: 'Channel code is required.' })
+    const commission = Number(commission_pct || 0)
+    if (commission < 0 || commission > 100) return res.status(400).json({ error: 'Commission must be 0–100%.' })
+    const st = status === 'paused' ? 'paused' : 'active'
+    const r = await pool.query(
+      `INSERT INTO crs_channels (name, code, commission_pct, status)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [String(name).trim(), slug, commission, st]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'crs_channel',
+      entityId: r.rows[0].id,
+      summary: `Added CRS channel “${String(name).trim()}”`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    if (e.code === '23505') return res.status(400).json({ error: 'That channel code already exists.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/crs/channels/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM crs_channels WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Channel not found.' })
+    const row = current.rows[0]
+    const name = req.body?.name != null ? String(req.body.name).trim() : row.name
+    const commission = req.body?.commission_pct != null ? Number(req.body.commission_pct) : Number(row.commission_pct)
+    if (!name) return res.status(400).json({ error: 'Channel name is required.' })
+    if (commission < 0 || commission > 100) return res.status(400).json({ error: 'Commission must be 0–100%.' })
+    let st = req.body?.status === 'paused' || req.body?.status === 'active' ? req.body.status : row.status
+    if (row.code === 'direct') st = 'active'
+    await pool.query(
+      `UPDATE crs_channels SET name = $1, commission_pct = $2, status = $3 WHERE id = $4`,
+      [name, commission, st, req.params.id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'crs_channel',
+      entityId: row.id,
+      summary: `Updated CRS channel “${name}”`,
+    })
+    res.json({ ok: true, id: row.id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/crs/channels/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM crs_channels WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Channel not found.' })
+    if (current.rows[0].code === 'direct') return res.status(400).json({ error: 'The direct website channel cannot be removed.' })
+    await pool.query('DELETE FROM crs_channels WHERE id = $1', [req.params.id])
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'crs_channel',
+      entityId: current.rows[0].id,
+      summary: `Removed CRS channel “${current.rows[0].name}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/crs/availability', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const start = req.query.from || ymd(new Date())
+    const days = Math.min(31, Math.max(7, parseInt(req.query.days, 10) || 14))
+    const startDate = new Date(`${start}T00:00:00`)
+    const dates = []
+    for (let i = 0; i < days; i++) {
+      const d = new Date(startDate)
+      d.setDate(d.getDate() + i)
+      dates.push(ymd(d))
+    }
+    const end = dates[dates.length - 1]
+    const endExclusive = ymd(new Date(new Date(`${end}T00:00:00`).getTime() + 86400000))
+    const hotelId = req.query.hotel_id ? parseInt(req.query.hotel_id, 10) : null
+    const roomsQ = hotelId
+      ? await pool.query(
+          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, h.name AS hotel_name
+           FROM rooms r JOIN hotels h ON h.id = r.hotel_id WHERE r.hotel_id = $1 ORDER BY h.name, r.name`,
+          [hotelId]
+        )
+      : await pool.query(
+          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, h.name AS hotel_name
+           FROM rooms r JOIN hotels h ON h.id = r.hotel_id ORDER BY h.name, r.name`
+        )
+    const bookings = await pool.query(
+      `SELECT room_id, to_char(check_in, 'YYYY-MM-DD') AS check_in, to_char(check_out, 'YYYY-MM-DD') AS check_out
+       FROM bookings
+       WHERE status IN ('pending', 'confirmed')
+         AND check_in < $2::date AND check_out > $1::date`,
+      [start, endExclusive]
+    )
+    const stops = await pool.query(
+      `SELECT id, room_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
+       FROM crs_stopsell
+       WHERE start_date <= $2::date AND end_date >= $1::date`,
+      [start, end]
+    )
+    const rooms = roomsQ.rows.map((room) => {
+      const cells = {}
+      for (const date of dates) {
+        if (room.room_status === 'maintenance') {
+          cells[date] = { status: 'maintenance' }
+          continue
+        }
+        const booked = bookings.rows.find(
+          (b) => b.room_id === room.room_id && b.check_in <= date && b.check_out > date
+        )
+        if (booked) {
+          cells[date] = { status: 'booked' }
+          continue
+        }
+        const stop = stops.rows.find(
+          (s) => s.room_id === room.room_id && s.start_date <= date && s.end_date >= date
+        )
+        cells[date] = stop ? { status: 'blocked', stop_id: stop.id } : { status: 'available' }
+      }
+      return { ...room, cells }
+    })
+    const counts = { available: 0, booked: 0, blocked: 0, maintenance: 0 }
+    rooms.forEach((room) => {
+      dates.forEach((date) => {
+        counts[room.cells[date].status] += 1
+      })
+    })
+    res.json({ from: start, days, dates, rooms, counts })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crs/stopsell', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { room_id, start_date, end_date, reason } = req.body || {}
+    if (!room_id || !start_date) return res.status(400).json({ error: 'Select a room and date.' })
+    const end = end_date || start_date
+    if (end < start_date) return res.status(400).json({ error: 'End date must be on or after the start date.' })
+    const room = await pool.query('SELECT id, name FROM rooms WHERE id = $1', [room_id])
+    if (!room.rows[0]) return res.status(404).json({ error: 'Room not found.' })
+    const r = await pool.query(
+      `INSERT INTO crs_stopsell (room_id, start_date, end_date, reason)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [room_id, start_date, end, reason || 'Stop sell']
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'crs_stopsell',
+      entityId: r.rows[0].id,
+      summary: `Closed “${room.rows[0].name}” ${start_date}${end !== start_date ? `–${end}` : ''}`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/crs/stopsell/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM crs_stopsell WHERE id = $1 RETURNING id, room_id', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Stop-sell not found.' })
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'crs_stopsell',
+      entityId: r.rows[0].id,
+      summary: 'Opened dates for sale',
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+function vipFromPoints(points) {
+  const n = Number(points || 0)
+  if (n >= 2500) return 'platinum'
+  if (n >= 1000) return 'gold'
+  if (n >= 500) return 'silver'
+  return 'regular'
+}
+
+async function ensureGuestProfile(userId) {
+  if (!userId) return null
+  await pool.query(
+    `INSERT INTO guest_profiles (user_id) VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  )
+  const r = await pool.query('SELECT * FROM guest_profiles WHERE user_id = $1', [userId])
+  return r.rows[0] || null
+}
+
+async function applyLoyalty(userId, type, points, description, bookingId = null) {
+  const profile = await ensureGuestProfile(userId)
+  if (!profile) throw new Error('Guest profile not found.')
+  const amount = Math.abs(parseInt(points, 10) || 0)
+  if (!amount) throw new Error('Enter a point amount.')
+  let next = Number(profile.loyalty_points || 0)
+  if (type === 'earn' || (type === 'adjustment' && Number(points) > 0)) next += amount
+  else if (type === 'redeem' || (type === 'adjustment' && Number(points) < 0)) {
+    if (amount > next) throw new Error('Not enough loyalty points.')
+    next -= amount
+  } else {
+    throw new Error('Invalid loyalty type.')
+  }
+  const vip = vipFromPoints(next)
+  await pool.query(
+    `UPDATE guest_profiles SET loyalty_points = $1, vip_status = $2 WHERE user_id = $3`,
+    [next, vip, userId]
+  )
+  await pool.query(
+    `INSERT INTO loyalty_transactions (user_id, booking_id, type, points, description)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [userId, bookingId, type, amount, description || null]
+  )
+  return { loyalty_points: next, vip_status: vip }
+}
+
+async function awardStayPoints(booking) {
+  if (!booking?.user_id || !booking?.id) return
+  const exists = await pool.query(
+    `SELECT 1 FROM loyalty_transactions WHERE booking_id = $1 AND type = 'earn' LIMIT 1`,
+    [booking.id]
+  )
+  if (exists.rows[0]) return
+  const points = Math.max(1, Math.floor(Number(booking.total_price || 0)))
+  await applyLoyalty(booking.user_id, 'earn', points, `Stay reward for booking #${booking.id}`, booking.id)
+}
+
+async function ensureCrmTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS guest_profiles (
+      user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      loyalty_points INT NOT NULL DEFAULT 0,
+      vip_status VARCHAR(20) NOT NULL DEFAULT 'regular'
+        CHECK (vip_status IN ('regular', 'silver', 'gold', 'platinum')),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS loyalty_transactions (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id INT REFERENCES bookings(id) ON DELETE SET NULL,
+      type VARCHAR(20) NOT NULL CHECK (type IN ('earn', 'redeem', 'adjustment')),
+      points INT NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_loyalty_user ON loyalty_transactions(user_id)')
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_campaigns (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      audience VARCHAR(20) NOT NULL DEFAULT 'all' CHECK (audience IN ('all', 'vip', 'stayed')),
+      subject VARCHAR(200) NOT NULL,
+      message TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent')),
+      sent_count INT NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS crm_communications (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      campaign_id INT REFERENCES crm_campaigns(id) ON DELETE SET NULL,
+      subject VARCHAR(200) NOT NULL,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query(
+    `INSERT INTO guest_profiles (user_id)
+     SELECT id FROM users WHERE role = 'guest'
+     ON CONFLICT (user_id) DO NOTHING`
+  )
+}
+
+async function campaignAudience(audience) {
+  if (audience === 'vip') {
+    return pool.query(
+      `SELECT u.id, u.username, u.email FROM users u
+       JOIN guest_profiles p ON p.user_id = u.id
+       WHERE u.role = 'guest' AND p.vip_status <> 'regular'
+       ORDER BY u.username`
+    )
+  }
+  if (audience === 'stayed') {
+    return pool.query(
+      `SELECT DISTINCT u.id, u.username, u.email FROM users u
+       JOIN bookings b ON b.user_id = u.id AND b.status IN ('confirmed', 'completed')
+       WHERE u.role = 'guest'
+       ORDER BY u.username`
+    )
+  }
+  return pool.query(
+    `SELECT id, username, email FROM users WHERE role = 'guest' ORDER BY username`
+  )
+}
+
+app.get('/api/crm/loyalty', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    await pool.query(
+      `INSERT INTO guest_profiles (user_id)
+       SELECT id FROM users WHERE role = 'guest'
+       ON CONFLICT (user_id) DO NOTHING`
+    )
+    const guests = await pool.query(
+      `SELECT u.id, u.username, u.email, to_char(u.created_at, 'YYYY-MM-DD') AS joined,
+              p.loyalty_points, p.vip_status, p.notes,
+              COUNT(b.id) FILTER (WHERE b.status IN ('confirmed', 'completed'))::int AS stays,
+              COALESCE(SUM(b.total_price) FILTER (WHERE b.status IN ('confirmed', 'completed')), 0) AS spend
+       FROM users u
+       JOIN guest_profiles p ON p.user_id = u.id
+       LEFT JOIN bookings b ON b.user_id = u.id
+       WHERE u.role = 'guest'
+       GROUP BY u.id, u.username, u.email, u.created_at, p.loyalty_points, p.vip_status, p.notes
+       ORDER BY p.loyalty_points DESC, u.username`
+    )
+    const tx = req.query.user_id
+      ? await pool.query(
+          `SELECT id, user_id, booking_id, type, points, description,
+                  to_char(created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+           FROM loyalty_transactions WHERE user_id = $1 ORDER BY id DESC LIMIT 50`,
+          [req.query.user_id]
+        )
+      : await pool.query(
+          `SELECT t.id, t.user_id, u.username, t.booking_id, t.type, t.points, t.description,
+                  to_char(t.created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+           FROM loyalty_transactions t JOIN users u ON u.id = t.user_id
+           ORDER BY t.id DESC LIMIT 40`
+        )
+    res.json({ guests: guests.rows, transactions: tx.rows })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crm/loyalty', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { user_id, type, points, description } = req.body || {}
+    if (!user_id) return res.status(400).json({ error: 'Select a guest.' })
+    const kind = ['earn', 'redeem', 'adjustment'].includes(type) ? type : null
+    if (!kind) return res.status(400).json({ error: 'Choose earn, redeem, or adjustment.' })
+    const amount = Number(points)
+    if (!amount || Number.isNaN(amount)) return res.status(400).json({ error: 'Enter a point amount.' })
+    const result = await applyLoyalty(user_id, kind, amount, description || `Staff ${kind}`)
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'crm_loyalty',
+      entityId: user_id,
+      summary: `${kind} ${Math.abs(amount)} loyalty points`,
+    })
+    res.status(201).json({ ok: true, ...result })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.get('/api/crm/campaigns', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query(
+      `SELECT id, name, audience, subject, message, status, sent_count,
+              to_char(sent_at, 'YYYY-MM-DD HH24:MI') AS sent_at,
+              to_char(created_at, 'YYYY-MM-DD') AS created_at
+       FROM crm_campaigns ORDER BY id DESC`
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crm/campaigns', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { name, audience, subject, message } = req.body || {}
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Campaign name is required.' })
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'Subject is required.' })
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'Message is required.' })
+    const aud = ['all', 'vip', 'stayed'].includes(audience) ? audience : 'all'
+    const r = await pool.query(
+      `INSERT INTO crm_campaigns (name, audience, subject, message)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [String(name).trim(), aud, String(subject).trim(), String(message).trim()]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'crm_campaign',
+      entityId: r.rows[0].id,
+      summary: `Created campaign “${String(name).trim()}”`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crm/campaigns/:id/send', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM crm_campaigns WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Campaign not found.' })
+    const row = current.rows[0]
+    if (row.status === 'sent') return res.status(400).json({ error: 'This campaign was already sent.' })
+    const targets = await campaignAudience(row.audience)
+    if (!targets.rows.length) return res.status(400).json({ error: 'No guests match this audience yet.' })
+    for (const guest of targets.rows) {
+      await pool.query(
+        `INSERT INTO crm_communications (user_id, campaign_id, subject, message)
+         VALUES ($1, $2, $3, $4)`,
+        [guest.id, row.id, row.subject, row.message]
+      )
+    }
+    await pool.query(
+      `UPDATE crm_campaigns SET status = 'sent', sent_count = $1, sent_at = NOW() WHERE id = $2`,
+      [targets.rows.length, row.id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'crm_campaign',
+      entityId: row.id,
+      summary: `Sent campaign “${row.name}” to ${targets.rows.length} guests`,
+    })
+    res.json({ ok: true, sent_count: targets.rows.length })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/crm/campaigns/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT id, name, status FROM crm_campaigns WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Campaign not found.' })
+    if (current.rows[0].status === 'sent') return res.status(400).json({ error: 'A sent campaign cannot be deleted.' })
+    await pool.query('DELETE FROM crm_campaigns WHERE id = $1', [req.params.id])
+    await writeAudit(req, {
+      action: 'delete',
+      entity: 'crm_campaign',
+      entityId: current.rows[0].id,
+      summary: `Deleted draft campaign “${current.rows[0].name}”`,
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/crm/communications', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const params = []
+    let where = ''
+    if (req.query.user_id) {
+      params.push(req.query.user_id)
+      where = `WHERE c.user_id = $${params.length}`
+    }
+    const r = await pool.query(
+      `SELECT c.id, c.user_id, u.username, u.email, c.campaign_id, cam.name AS campaign_name,
+              c.subject, c.message, to_char(c.created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+       FROM crm_communications c
+       JOIN users u ON u.id = c.user_id
+       LEFT JOIN crm_campaigns cam ON cam.id = c.campaign_id
+       ${where}
+       ORDER BY c.id DESC
+       LIMIT 200`,
+      params
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/crm/communications', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const { user_id, subject, message } = req.body || {}
+    if (!user_id) return res.status(400).json({ error: 'Select a guest.' })
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'Subject is required.' })
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'Message is required.' })
+    const guest = await pool.query(`SELECT id, username FROM users WHERE id = $1 AND role = 'guest'`, [user_id])
+    if (!guest.rows[0]) return res.status(404).json({ error: 'Guest not found.' })
+    const r = await pool.query(
+      `INSERT INTO crm_communications (user_id, subject, message)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [user_id, String(subject).trim(), String(message).trim()]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'crm_communication',
+      entityId: r.rows[0].id,
+      summary: `Message to ${guest.rows[0].username}: ${String(subject).trim()}`,
+    })
+    res.status(201).json({ ok: true, id: r.rows[0].id })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 pool.query('SELECT 1').then(async () => {
+  await ensureCrmTables()
+  await ensureCrsTables()
+  await ensureGalleryColumns()
   await ensureFinanceTables()
   await ensureHrTables()
+  await ensureHousekeepingTables()
   await ensurePayrollExpenseLink()
   await ensureGuestTables()
   await ensureAuditTable()

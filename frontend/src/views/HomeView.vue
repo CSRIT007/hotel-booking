@@ -67,14 +67,18 @@
         </div>
         <div class="mt-12 grid gap-8 lg:grid-cols-2">
           <div
-            v-for="room in rooms.slice(0, 4)"
+            v-for="room in featuredRooms"
             :key="room.id"
             class="flex overflow-hidden rounded-3xl border border-stone-200 bg-warm-50 shadow-sm"
           >
-            <div
-              class="h-auto min-h-[12rem] w-2/5 flex-shrink-0 bg-stone-200 bg-cover bg-center"
-              :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
-            />
+            <div class="relative w-2/5 min-h-[12rem] flex-shrink-0 bg-stone-200">
+              <img
+                :src="roomCover(room)"
+                :alt="room.name"
+                class="absolute inset-0 h-full w-full object-cover"
+                @error="onRoomPhotoError"
+              />
+            </div>
             <div class="flex flex-1 flex-col justify-center p-6">
               <p class="text-sm font-medium text-brand-700">{{ formatMoney(room.price) }} <span class="font-normal text-stone-500">/ night</span></p>
               <h3 class="mt-1 font-display text-xl font-semibold text-stone-800">{{ room.name }}</h3>
@@ -89,6 +93,7 @@
             </div>
           </div>
         </div>
+        <p v-if="featuredRooms.length === 0" class="mt-10 text-center text-stone-500">No rooms to feature yet.</p>
       </div>
     </section>
 
@@ -113,17 +118,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getHotels, getRooms, getTestimonials } from '../services/data'
 import { formatMoney } from '../utils/money'
+import { roomCover, onRoomPhotoError } from '../constants/media'
 
 const hotels = ref([])
 const rooms = ref([])
 const testimonials = ref([])
 
+const featuredRooms = computed(() =>
+  rooms.value.filter((r) => r.status !== 'maintenance').slice(0, 4)
+)
+
 onMounted(async () => {
   hotels.value = await getHotels()
-  rooms.value = await getRooms({ status: 'available' })
+  rooms.value = await getRooms()
   testimonials.value = await getTestimonials()
 })
 </script>
