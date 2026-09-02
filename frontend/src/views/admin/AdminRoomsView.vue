@@ -62,13 +62,7 @@
               <option value="maintenance">Maintenance</option>
             </select>
           </div>
-          <div>
-            <label class="block text-xs font-medium text-stone-700">Photo</label>
-            <select v-model="form.image" class="field" :disabled="saving">
-              <option v-for="img in ROOM_IMAGES" :key="img.value" :value="img.value">{{ img.label }}</option>
-            </select>
-            <div class="mt-2 h-28 rounded-lg bg-stone-200 bg-cover bg-center" :style="{ backgroundImage: `url(${form.image})` }" />
-          </div>
+          <AdminPhotoFields v-model:image="form.image" v-model:images="form.images" :stock="ROOM_IMAGES" :disabled="saving" />
         </div>
         <p v-if="formError" class="mt-3 text-sm text-red-600">{{ formError }}</p>
         <p v-if="formSuccess" class="mt-3 text-sm text-green-600">{{ formSuccess }}</p>
@@ -147,6 +141,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { createRoom, deleteRoom, getHotels, getRooms, updateRoom } from '../../services/data'
 import { ROOM_IMAGES } from '../../constants/media'
 import ConfirmModal from '../../components/ConfirmModal.vue'
+import AdminPhotoFields from '../../components/AdminPhotoFields.vue'
 import { formatMoney } from '../../utils/money'
 
 const hotels = ref([])
@@ -168,6 +163,7 @@ const form = reactive({
   view_type: 'City View',
   beds: 1,
   image: ROOM_IMAGES[0].value,
+  images: [],
   status: 'available',
 })
 
@@ -182,6 +178,7 @@ function resetForm() {
   form.view_type = 'City View'
   form.beds = 1
   form.image = ROOM_IMAGES[0].value
+  form.images = []
   form.status = 'available'
   formError.value = ''
 }
@@ -197,6 +194,7 @@ function edit(r) {
   form.view_type = r.view_type || ''
   form.beds = Number(r.beds || 1)
   form.image = r.image || ROOM_IMAGES[0].value
+  form.images = Array.isArray(r.images) ? [...r.images] : []
   form.status = r.status || 'available'
   formError.value = ''
   formSuccess.value = ''

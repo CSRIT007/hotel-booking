@@ -11,6 +11,9 @@ const client = axios.create({
 })
 
 client.interceptors.request.use((config) => {
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  }
   try {
     const u = JSON.parse(localStorage.getItem('hotel_user') || 'null')
     if (u?.id) {
@@ -31,6 +34,17 @@ function throwApiError(e, fallback) {
 export async function getHotels() {
   const { data } = await client.get('/api/hotels')
   return Array.isArray(data) ? data : []
+}
+
+export async function uploadImage(file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  try {
+    const { data } = await client.post('/api/upload', fd)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to upload photo')
+  }
 }
 
 export async function createHotel(payload) {
@@ -425,5 +439,188 @@ export async function deleteHrLeave(id) {
     return data
   } catch (e) {
     throwApiError(e, 'Failed to delete leave')
+  }
+}
+
+export async function getHousekeeping() {
+  try {
+    const { data } = await client.get('/api/housekeeping')
+    return data || { rooms: [], staff: [] }
+  } catch (e) {
+    throwApiError(e, 'Failed to load housekeeping')
+  }
+}
+
+export async function createHousekeepingTask(payload) {
+  try {
+    const { data } = await client.post('/api/housekeeping', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to open housekeeping task')
+  }
+}
+
+export async function updateHousekeepingTask(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/housekeeping/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update housekeeping')
+  }
+}
+
+export async function getCrsRates() {
+  const { data } = await client.get('/api/crs/rates')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createCrsRate(payload) {
+  try {
+    const { data } = await client.post('/api/crs/rates', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to save rate plan')
+  }
+}
+
+export async function updateCrsRate(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/crs/rates/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update rate plan')
+  }
+}
+
+export async function deleteCrsRate(id) {
+  try {
+    const { data } = await client.delete(`/api/crs/rates/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete rate plan')
+  }
+}
+
+export async function getCrsChannels() {
+  const { data } = await client.get('/api/crs/channels')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createCrsChannel(payload) {
+  try {
+    const { data } = await client.post('/api/crs/channels', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add channel')
+  }
+}
+
+export async function updateCrsChannel(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/crs/channels/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update channel')
+  }
+}
+
+export async function deleteCrsChannel(id) {
+  try {
+    const { data } = await client.delete(`/api/crs/channels/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete channel')
+  }
+}
+
+export async function getCrsAvailability(params = {}) {
+  const { data } = await client.get('/api/crs/availability', { params })
+  return data || { dates: [], rooms: [], counts: {} }
+}
+
+export async function closeCrsDates(payload) {
+  try {
+    const { data } = await client.post('/api/crs/stopsell', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to close dates')
+  }
+}
+
+export async function openCrsDates(id) {
+  try {
+    const { data } = await client.delete(`/api/crs/stopsell/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to open dates')
+  }
+}
+
+export async function getCrsQuote(params) {
+  try {
+    const { data } = await client.get('/api/crs/quote', { params })
+    return data
+  } catch (e) {
+    throwApiError(e, 'Those dates are not available')
+  }
+}
+
+export async function getCrmLoyalty() {
+  const { data } = await client.get('/api/crm/loyalty')
+  return data || { guests: [], transactions: [] }
+}
+
+export async function adjustCrmLoyalty(payload) {
+  try {
+    const { data } = await client.post('/api/crm/loyalty', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update loyalty points')
+  }
+}
+
+export async function getCrmCampaigns() {
+  const { data } = await client.get('/api/crm/campaigns')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createCrmCampaign(payload) {
+  try {
+    const { data } = await client.post('/api/crm/campaigns', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to save campaign')
+  }
+}
+
+export async function sendCrmCampaign(id) {
+  try {
+    const { data } = await client.post(`/api/crm/campaigns/${id}/send`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to send campaign')
+  }
+}
+
+export async function deleteCrmCampaign(id) {
+  try {
+    const { data } = await client.delete(`/api/crm/campaigns/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to delete campaign')
+  }
+}
+
+export async function getCrmCommunications() {
+  const { data } = await client.get('/api/crm/communications')
+  return Array.isArray(data) ? data : []
+}
+
+export async function createCrmCommunication(payload) {
+  try {
+    const { data } = await client.post('/api/crm/communications', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to send message')
   }
 }

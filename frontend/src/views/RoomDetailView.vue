@@ -28,8 +28,19 @@
           <div class="lg:col-span-2">
             <div
               class="aspect-[4/3] rounded-2xl bg-stone-200 bg-cover bg-center"
-              :style="{ backgroundImage: `url(${room.image || '/images/room-1.jpg'})` }"
+              :style="{ backgroundImage: `url(${gallery[activePhoto] || '/images/room-1.jpg'})` }"
             />
+            <div v-if="gallery.length > 1" class="mt-3 grid grid-cols-4 gap-2 sm:grid-cols-6">
+              <button
+                v-for="(src, i) in gallery"
+                :key="src + i"
+                type="button"
+                class="aspect-[4/3] rounded-lg bg-stone-200 bg-cover bg-center ring-2 ring-offset-1"
+                :class="i === activePhoto ? 'ring-brand-600' : 'ring-transparent'"
+                :style="{ backgroundImage: `url(${src})` }"
+                @click="activePhoto = i"
+              />
+            </div>
             <p class="mt-4 text-stone-600">{{ room.description }}</p>
             <ul class="mt-4 space-y-2 text-stone-600">
               <li><span class="font-medium text-stone-800">Max guests:</span> {{ room.max_persons }}</li>
@@ -68,7 +79,8 @@
                   <option v-for="n in room.max_persons" :key="n" :value="n">{{ n }}</option>
                 </select>
               </div>
-              <p v-if="totalPrice" class="text-lg font-medium text-stone-800">Total: {{ formatMoney(totalPrice) }}</p>
+              <p v-if="quoteError" class="text-sm text-red-600">{{ quoteError }}</p>
+              <p v-else-if="totalPrice" class="text-lg font-medium text-stone-800">Total: {{ formatMoney(totalPrice) }} <span class="text-sm font-normal text-stone-500">{{ quoteNights ? `· ${quoteNights} night${quoteNights === 1 ? '' : 's'}` : '' }}</span></p>
               <p v-if="bookingError" class="text-sm text-red-600">{{ bookingError }}</p>
               <p v-if="bookingSuccess" class="text-sm text-green-600">{{ bookingSuccess }}</p>
               <router-link
@@ -80,7 +92,7 @@
               </router-link>
               <button
                 type="submit"
-                :disabled="bookingLoading"
+                :disabled="bookingLoading || !!quoteError"
                 class="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {{ bookingLoading ? 'Booking…' : 'Request booking' }}
@@ -104,13 +116,14 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
-import { getRoom, createBooking } from '../services/data'
+import { getRoom, createBooking, getCrsQuote } from '../services/data'
 import { formatMoney } from '../utils/money'
 
 const route = useRoute()
 const { isLoggedIn, currentUser } = useAuth()
 const loading = ref(true)
 const room = ref(null)
+const activePhoto = ref(0)
 const form = ref({
   check_in: '',
   check_out: '',
@@ -119,8 +132,19 @@ const form = ref({
 const bookingError = ref('')
 const bookingSuccess = ref('')
 const bookingLoading = ref(false)
+const quoteTotal = ref(null)
+const quoteNights = ref(0)
+const quoteError = ref('')
+
+const gallery = computed(() => {
+  if (!room.value) return []
+  const cover = room.value.image || '/images/room-1.jpg'
+  const extras = (room.value.images || []).filter((src) => src && src !== cover)
+  return [cover, ...extras]
+})
 
 const totalPrice = computed(() => {
+  if (quoteTotal.value != null) return quoteTotal.value
   if (!room.value || !form.value.check_in || !form.value.check_out) return 0
   const a = new Date(form.value.check_in)
   const b = new Date(form.value.check_out)
@@ -132,6 +156,7 @@ async function loadRoom() {
   loading.value = true
   room.value = null
   room.value = await getRoom(route.params.id)
+  activePhoto.value = 0
   if (room.value) form.value.guests = Math.min(form.value.guests, room.value.max_persons)
   loading.value = false
 }
@@ -158,6 +183,10 @@ async function submitBooking() {
     bookingError.value = 'Guests exceed room capacity.'
     return
   }
+  if (quoteError.value) {
+    bookingError.value = quoteError.value
+    return
+  }
   bookingLoading.value = true
   try {
     await createBooking({
@@ -176,6 +205,23 @@ async function submitBooking() {
   bookingLoading.value = false
 }
 
-onMounted(loadRoom)
+async function refreshQuote() {
+  quoteTotal.value = null
+  quoteNights.value = 0
+  quoteError.value = ''
+  const checkIn = form.value.check_in
+  const checkOut = form.value.check_out
+  if (!room.value || !checkIn || !checkOut || checkOut <= checkIn) return
+  try {
+    const q = await getCrsQuote({ room_id: room.value.id, check_in: checkIn, check_out: checkOut })
+    quoteTotal.value = Number(q.total)
+    quoteNights.value = Number(q.nights || 0)
+  } catch (e) {
+    quoteError.value = e.message
+  }
+}
+
+watch(() => [form.value.check_in, form.value.check_out, room.value?.id], refreshQuote)
 watch(() => route.params.id, loadRoom)
+onMounted(loadRoom)
 </script>

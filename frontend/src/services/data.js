@@ -43,6 +43,7 @@ function mapRecord(r) {
   const id = r.id ?? r.field_id ?? r.record_id
   const out = { ...r, id }
   if (out.image) out.image = ensureImagePath(out.image)
+  out.images = Array.isArray(out.images) ? out.images.map(ensureImagePath).filter(Boolean) : []
   return out
 }
 
@@ -69,6 +70,10 @@ export async function getHotels() {
 export async function createHotel(payload) {
   if (hasLocalApi) return await localApi.createHotel(payload)
   throw new Error('No API configured')
+}
+
+export async function uploadImage(file) {
+  return requireLocal(() => localApi.uploadImage(file), 'Failed to upload photo')
 }
 
 export async function updateHotel(id, payload) {
@@ -626,4 +631,138 @@ export async function markNotificationsRead(userId) {
       console.warn('Local API markNotificationsRead failed:', e.message)
     }
   }
+}
+
+export async function getHousekeeping() {
+  if (!hasLocalApi) return { rooms: [], staff: [] }
+  try {
+    return await localApi.getHousekeeping()
+  } catch (e) {
+    console.warn('Local API getHousekeeping failed:', e.message)
+    return { rooms: [], staff: [] }
+  }
+}
+
+export async function createHousekeepingTask(payload) {
+  return requireLocal(() => localApi.createHousekeepingTask(payload), 'Failed to open housekeeping task')
+}
+
+export async function updateHousekeepingTask(id, payload) {
+  return requireLocal(() => localApi.updateHousekeepingTask(id, payload), 'Failed to update housekeeping')
+}
+
+export async function getCrsRates() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getCrsRates()
+  } catch (e) {
+    console.warn('Local API getCrsRates failed:', e.message)
+    return []
+  }
+}
+
+export async function createCrsRate(payload) {
+  return requireLocal(() => localApi.createCrsRate(payload), 'Failed to save rate plan')
+}
+
+export async function updateCrsRate(id, payload) {
+  return requireLocal(() => localApi.updateCrsRate(id, payload), 'Failed to update rate plan')
+}
+
+export async function deleteCrsRate(id) {
+  return requireLocal(() => localApi.deleteCrsRate(id), 'Failed to delete rate plan')
+}
+
+export async function getCrsChannels() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getCrsChannels()
+  } catch (e) {
+    console.warn('Local API getCrsChannels failed:', e.message)
+    return []
+  }
+}
+
+export async function createCrsChannel(payload) {
+  return requireLocal(() => localApi.createCrsChannel(payload), 'Failed to add channel')
+}
+
+export async function updateCrsChannel(id, payload) {
+  return requireLocal(() => localApi.updateCrsChannel(id, payload), 'Failed to update channel')
+}
+
+export async function deleteCrsChannel(id) {
+  return requireLocal(() => localApi.deleteCrsChannel(id), 'Failed to delete channel')
+}
+
+export async function getCrsAvailability(params) {
+  if (!hasLocalApi) return { dates: [], rooms: [], counts: {} }
+  try {
+    return await localApi.getCrsAvailability(params)
+  } catch (e) {
+    console.warn('Local API getCrsAvailability failed:', e.message)
+    return { dates: [], rooms: [], counts: {} }
+  }
+}
+
+export async function closeCrsDates(payload) {
+  return requireLocal(() => localApi.closeCrsDates(payload), 'Failed to close dates')
+}
+
+export async function openCrsDates(id) {
+  return requireLocal(() => localApi.openCrsDates(id), 'Failed to open dates')
+}
+
+export async function getCrsQuote(params) {
+  return requireLocal(() => localApi.getCrsQuote(params), 'Those dates are not available')
+}
+
+export async function getCrmLoyalty() {
+  if (!hasLocalApi) return { guests: [], transactions: [] }
+  try {
+    return await localApi.getCrmLoyalty()
+  } catch (e) {
+    console.warn('Local API getCrmLoyalty failed:', e.message)
+    return { guests: [], transactions: [] }
+  }
+}
+
+export async function adjustCrmLoyalty(payload) {
+  return requireLocal(() => localApi.adjustCrmLoyalty(payload), 'Failed to update loyalty points')
+}
+
+export async function getCrmCampaigns() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getCrmCampaigns()
+  } catch (e) {
+    console.warn('Local API getCrmCampaigns failed:', e.message)
+    return []
+  }
+}
+
+export async function createCrmCampaign(payload) {
+  return requireLocal(() => localApi.createCrmCampaign(payload), 'Failed to save campaign')
+}
+
+export async function sendCrmCampaign(id) {
+  return requireLocal(() => localApi.sendCrmCampaign(id), 'Failed to send campaign')
+}
+
+export async function deleteCrmCampaign(id) {
+  return requireLocal(() => localApi.deleteCrmCampaign(id), 'Failed to delete campaign')
+}
+
+export async function getCrmCommunications() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getCrmCommunications()
+  } catch (e) {
+    console.warn('Local API getCrmCommunications failed:', e.message)
+    return []
+  }
+}
+
+export async function createCrmCommunication(payload) {
+  return requireLocal(() => localApi.createCrmCommunication(payload), 'Failed to send message')
 }

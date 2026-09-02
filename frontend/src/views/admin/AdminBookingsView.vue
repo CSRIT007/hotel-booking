@@ -53,6 +53,14 @@
                     Cancel
                   </button>
                 </template>
+                <button
+                  v-else-if="b.status === 'confirmed'"
+                  type="button"
+                  class="text-brand-700 hover:underline"
+                  @click="updateStatus(b.id, 'completed')"
+                >
+                  Check out
+                </button>
                 <span v-else class="text-stone-400">—</span>
               </td>
             </tr>

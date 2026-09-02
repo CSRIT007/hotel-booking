@@ -14,3 +14,18 @@ export const ROOM_IMAGES = [
   { value: '/images/room-5.jpg', label: 'Twin' },
   { value: '/images/room-6.jpg', label: 'Premium' },
 ]
+
+export const DEFAULT_ROOM_PHOTO = '/images/room-1.jpg'
+
+export function roomCover(room) {
+  const cover = typeof room?.image === 'string' ? room.image.trim() : ''
+  if (cover) return cover
+  const extra = Array.isArray(room?.images) ? room.images.find((src) => typeof src === 'string' && src.trim()) : ''
+  return extra || DEFAULT_ROOM_PHOTO
+}
+
+export function onRoomPhotoError(e) {
+  if (e?.target && e.target.src && !e.target.src.endsWith(DEFAULT_ROOM_PHOTO)) {
+    e.target.src = DEFAULT_ROOM_PHOTO
+  }
+}
