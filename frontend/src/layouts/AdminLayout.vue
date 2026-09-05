@@ -30,6 +30,7 @@
             </router-link>
             <router-link to="/admin/guests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/guests') }">Guests</router-link>
             <router-link to="/admin/housekeeping" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/housekeeping') }">Housekeeping</router-link>
+            <router-link to="/admin/slides" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/slides') }">Slideshow</router-link>
           </div>
         </div>
 
@@ -219,7 +220,8 @@ function groupForPath(path) {
     path.startsWith('/admin/rooms') ||
     path.startsWith('/admin/properties') ||
     path.startsWith('/admin/guests') ||
-    path.startsWith('/admin/housekeeping')
+    path.startsWith('/admin/housekeeping') ||
+    path.startsWith('/admin/slides')
   ) return 'pms'
   if (path.startsWith('/admin/pos')) return 'pos'
   if (path.startsWith('/admin/crs')) return 'crs'

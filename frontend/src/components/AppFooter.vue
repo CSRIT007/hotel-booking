@@ -19,7 +19,8 @@
         </div>
         <div>
           <h4 class="text-sm font-semibold uppercase tracking-wider text-white">Contact</h4>
-          <p class="mt-3 text-sm">Phnom Penh, Cambodia</p>
+          <p class="mt-3 text-sm">Sangkat Tul Kok, Khan Tul Kok, Phnom Penh</p>
+          <p class="text-sm">+855 98 944 686</p>
           <p class="text-sm">noreply@smilerental.com</p>
         </div>
       </div>

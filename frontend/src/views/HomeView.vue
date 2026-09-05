@@ -1,29 +1,6 @@
 <template>
   <div>
-    <section class="relative min-h-[78vh] overflow-hidden bg-stone-900">
-      <div
-        class="absolute inset-0 scale-105 bg-cover bg-center"
-        style="background-image: url('/images/image_2.jpg');"
-      />
-      <div class="absolute inset-0 bg-gradient-to-r from-stone-950/80 via-stone-900/55 to-stone-900/20" />
-      <div class="relative mx-auto flex min-h-[78vh] max-w-6xl flex-col justify-center px-4 py-24 sm:px-6">
-        <p class="text-sm font-medium uppercase tracking-[0.2em] text-brand-300">Phnom Penh, Cambodia</p>
-        <h1 class="mt-4 max-w-3xl font-display text-4xl font-bold leading-tight text-white sm:text-6xl">
-          A calm stay in the heart of the city
-        </h1>
-        <p class="mt-4 max-w-xl text-lg text-stone-200">
-          Boutique rooms, thoughtful service, and easy booking for your next trip.
-        </p>
-        <div class="mt-10 flex flex-wrap gap-3">
-          <router-link to="/rooms" class="rounded-full bg-brand-600 px-6 py-3 font-medium text-white shadow-lg shadow-brand-900/30 hover:bg-brand-700">
-            Browse rooms
-          </router-link>
-          <router-link to="/contact" class="rounded-full border border-white/70 px-6 py-3 font-medium text-white hover:bg-white/10">
-            Contact us
-          </router-link>
-        </div>
-      </div>
-    </section>
+    <HeroSlideshow :slides="slides" />
 
     <section class="py-16 sm:py-24">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
@@ -119,13 +96,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getHotels, getRooms, getTestimonials } from '../services/data'
+import HeroSlideshow from '../components/HeroSlideshow.vue'
+import { getHotels, getRooms, getSlides, getTestimonials } from '../services/data'
 import { formatMoney } from '../utils/money'
 import { roomCover, onRoomPhotoError } from '../constants/media'
 
 const hotels = ref([])
 const rooms = ref([])
 const testimonials = ref([])
+const slides = ref([])
 
 const featuredRooms = computed(() =>
   rooms.value.filter((r) => r.status !== 'maintenance').slice(0, 4)
@@ -135,5 +114,6 @@ onMounted(async () => {
   hotels.value = await getHotels()
   rooms.value = await getRooms()
   testimonials.value = await getTestimonials()
+  slides.value = await getSlides()
 })
 </script>

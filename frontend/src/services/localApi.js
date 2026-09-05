@@ -743,3 +743,35 @@ export async function createGuestSatisfaction(payload) {
     throwApiError(e, 'Failed to save survey')
   }
 }
+
+export async function getSlides(params = {}) {
+  const { data } = await client.get('/api/slides', { params })
+  return Array.isArray(data) ? data : []
+}
+
+export async function createSlide(payload) {
+  try {
+    const { data } = await client.post('/api/slides', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add slide')
+  }
+}
+
+export async function updateSlide(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/slides/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update slide')
+  }
+}
+
+export async function deleteSlide(id) {
+  try {
+    const { data } = await client.delete(`/api/slides/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove slide')
+  }
+}

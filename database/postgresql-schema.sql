@@ -292,3 +292,16 @@ CREATE TABLE IF NOT EXISTS hr_leaves (
     status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS home_slides (
+    id SERIAL PRIMARY KEY,
+    eyebrow VARCHAR(120),
+    title VARCHAR(200) NOT NULL,
+    subtitle TEXT,
+    image VARCHAR(255) NOT NULL,
+    button_label VARCHAR(80),
+    button_link VARCHAR(200),
+    sort_order INT NOT NULL DEFAULT 1 CHECK (sort_order BETWEEN 1 AND 3),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);

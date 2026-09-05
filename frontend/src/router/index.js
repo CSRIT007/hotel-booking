@@ -26,6 +26,7 @@ const router = createRouter({
         { path: 'guests', name: 'AdminGuests', component: () => import('../views/admin/AdminGuestsView.vue'), meta: { title: 'Guests' } },
         { path: 'contacts', name: 'AdminContacts', component: () => import('../views/admin/AdminContactsView.vue'), meta: { title: 'Messages' } },
         { path: 'housekeeping', name: 'AdminHousekeeping', component: () => import('../views/admin/AdminHousekeepingView.vue'), meta: { title: 'Housekeeping' } },
+        { path: 'slides', name: 'AdminSlides', component: () => import('../views/admin/AdminSlidesView.vue'), meta: { title: 'Slideshow' } },
         { path: 'pos-sales', name: 'AdminPosSales', component: () => import('../views/admin/AdminPosSalesView.vue'), meta: { title: 'POS Sales' } },
         { path: 'pos-products', name: 'AdminPosProducts', component: () => import('../views/admin/AdminPosProductsView.vue'), meta: { title: 'POS Products' } },
         { path: 'pos-transactions', name: 'AdminPosTransactions', component: () => import('../views/admin/AdminPosTransactionsView.vue'), meta: { title: 'POS Transactions' } },

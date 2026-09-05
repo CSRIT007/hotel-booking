@@ -850,3 +850,64 @@ export async function getAnalytics(params) {
 export async function createGuestSatisfaction(payload) {
   return requireLocal(() => localApi.createGuestSatisfaction(payload), 'Failed to save survey')
 }
+
+const mockSlides = [
+  {
+    id: 1,
+    eyebrow: 'Phnom Penh, Cambodia',
+    title: 'A calm stay in the heart of the city',
+    subtitle: 'Boutique rooms, thoughtful service, and easy booking for your next trip.',
+    image: '/images/image_2.jpg',
+    button_label: 'Browse rooms',
+    button_link: '/rooms',
+    sort_order: 1,
+    status: 'active',
+  },
+  {
+    id: 2,
+    eyebrow: 'Sleep well',
+    title: 'Rooms made for rest after a day in the city',
+    subtitle: 'Choose a suite, family room, or a quiet standard — photos and prices are on each room page.',
+    image: '/images/image_4.jpg',
+    button_label: 'See rooms',
+    button_link: '/rooms',
+    sort_order: 2,
+    status: 'active',
+  },
+  {
+    id: 3,
+    eyebrow: 'Welcome',
+    title: 'Warm service from the front desk to housekeeping',
+    subtitle: 'Ask about late arrival, extra linen, or a longer stay. We reply from the hotel desk.',
+    image: '/images/image_5.jpg',
+    button_label: 'Contact us',
+    button_link: '/contact',
+    sort_order: 3,
+    status: 'active',
+  },
+]
+
+export async function getSlides(options = {}) {
+  const params = options.all ? { all: 1 } : {}
+  if (hasLocalApi) {
+    try {
+      return (await localApi.getSlides(params)).map(mapRecord)
+    } catch (e) {
+      console.warn('Local API getSlides failed, using mock:', e.message)
+    }
+  }
+  if (options.all) return mockSlides
+  return mockSlides.filter((s) => s.status === 'active')
+}
+
+export async function createSlide(payload) {
+  return requireLocal(() => localApi.createSlide(payload), 'Failed to add slide')
+}
+
+export async function updateSlide(id, payload) {
+  return requireLocal(() => localApi.updateSlide(id, payload), 'Failed to update slide')
+}
+
+export async function deleteSlide(id) {
+  return requireLocal(() => localApi.deleteSlide(id), 'Failed to remove slide')
+}

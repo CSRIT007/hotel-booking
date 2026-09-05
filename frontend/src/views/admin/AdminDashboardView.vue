@@ -140,6 +140,7 @@ const loading = ref(true)
 
 const shortcutItems = [
   { to: '/admin/properties', label: 'Properties', hint: 'Add or remove hotels' },
+  { to: '/admin/slides', label: 'Slideshow', hint: 'Home page hero photos' },
   { to: '/admin/bookings', label: 'Bookings', hint: 'Guest stays and requests' },
   { to: '/admin/hr-employees', label: 'Employee information', hint: 'Staff directory and positions' },
   { to: '/admin/maintenance-requests', label: 'Requests', hint: 'Repair and work orders' },
@@ -155,6 +156,7 @@ const quickLinks = [
   { to: '/admin/bookings', label: 'Bookings' },
   { to: '/admin/guests', label: 'Guests' },
   { to: '/admin/housekeeping', label: 'Housekeeping' },
+  { to: '/admin/slides', label: 'Slideshow' },
   { to: '/admin/pos-sales', label: 'Sales' },
   { to: '/admin/crs-rates', label: 'Rates' },
   { to: '/admin/crm-campaigns', label: 'Campaigns' },

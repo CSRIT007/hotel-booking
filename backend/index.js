@@ -4082,6 +4082,151 @@ app.post('/api/analytics/satisfaction', async (req, res) => {
   }
 })
 
+const SLIDE_MAX = 3
+
+async function ensureHomeSlides() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS home_slides (
+      id SERIAL PRIMARY KEY,
+      eyebrow VARCHAR(120),
+      title VARCHAR(200) NOT NULL,
+      subtitle TEXT,
+      image VARCHAR(255) NOT NULL,
+      button_label VARCHAR(80),
+      button_link VARCHAR(200),
+      sort_order INT NOT NULL DEFAULT 1 CHECK (sort_order BETWEEN 1 AND 3),
+      status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  const existing = await pool.query('SELECT 1 FROM home_slides LIMIT 1')
+  if (!existing.rows.length) {
+    await pool.query(
+      `INSERT INTO home_slides (eyebrow, title, subtitle, image, button_label, button_link, sort_order, status)
+       VALUES
+         ('Phnom Penh, Cambodia', 'A calm stay in the heart of the city', 'Boutique rooms, thoughtful service, and easy booking for your next trip.', '/images/image_2.jpg', 'Browse rooms', '/rooms', 1, 'active'),
+         ('Sleep well', 'Rooms made for rest after a day in the city', 'Choose a suite, family room, or a quiet standard — photos and prices are on each room page.', '/images/image_4.jpg', 'See rooms', '/rooms', 2, 'active'),
+         ('Welcome', 'Warm service from the front desk to housekeeping', 'Ask about late arrival, extra linen, or a longer stay. We reply from the hotel desk.', '/images/image_5.jpg', 'Contact us', '/contact', 3, 'active')`
+    )
+  }
+}
+
+function mapSlide(row) {
+  return {
+    id: row.id,
+    eyebrow: row.eyebrow || '',
+    title: row.title,
+    subtitle: row.subtitle || '',
+    image: row.image,
+    button_label: row.button_label || '',
+    button_link: row.button_link || '/rooms',
+    sort_order: row.sort_order,
+    status: row.status,
+  }
+}
+
+app.get('/api/slides', async (req, res) => {
+  try {
+    const all = String(req.query.all || '') === '1'
+    if (all && !requireStaff(req, res)) return
+    const where = all ? '' : "WHERE status = 'active'"
+    const r = await pool.query(
+      `SELECT id, eyebrow, title, subtitle, image, button_label, button_link, sort_order, status
+       FROM home_slides ${where}
+       ORDER BY sort_order, id
+       LIMIT $1`,
+      [all ? 20 : SLIDE_MAX]
+    )
+    res.json(r.rows.map(mapSlide))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/slides', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const count = await pool.query('SELECT COUNT(*)::int AS n FROM home_slides')
+    if (Number(count.rows[0].n) >= SLIDE_MAX) {
+      return res.status(400).json({ error: 'You can keep 3 slides. Edit or inactivate one, or remove it first.' })
+    }
+    const { eyebrow, title, subtitle, image, button_label, button_link, sort_order, status } = req.body || {}
+    if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required.' })
+    if (!image || !String(image).trim()) return res.status(400).json({ error: 'Upload or choose a photo.' })
+    const order = Math.min(SLIDE_MAX, Math.max(1, parseInt(sort_order, 10) || Number(count.rows[0].n) + 1))
+    const st = status === 'inactive' ? 'inactive' : 'active'
+    const r = await pool.query(
+      `INSERT INTO home_slides (eyebrow, title, subtitle, image, button_label, button_link, sort_order, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, eyebrow, title, subtitle, image, button_label, button_link, sort_order, status`,
+      [
+        String(eyebrow || '').trim() || null,
+        String(title).trim(),
+        String(subtitle || '').trim() || null,
+        String(image).trim(),
+        String(button_label || '').trim() || null,
+        String(button_link || '/rooms').trim() || '/rooms',
+        order,
+        st,
+      ]
+    )
+    await writeAudit(req, { action: 'create', entity: 'home_slide', entityId: r.rows[0].id, summary: `Added homepage slide “${r.rows[0].title}”` })
+    res.status(201).json(mapSlide(r.rows[0]))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/slides/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM home_slides WHERE id = $1', [req.params.id])
+    if (!current.rows[0]) return res.status(404).json({ error: 'Slide not found.' })
+    const row = current.rows[0]
+    const title = req.body?.title != null ? String(req.body.title).trim() : row.title
+    if (!title) return res.status(400).json({ error: 'Title is required.' })
+    const image = req.body?.image != null ? String(req.body.image).trim() : row.image
+    if (!image) return res.status(400).json({ error: 'Upload or choose a photo.' })
+    const status = ['active', 'inactive'].includes(req.body?.status) ? req.body.status : row.status
+    const order = req.body?.sort_order != null
+      ? Math.min(SLIDE_MAX, Math.max(1, parseInt(req.body.sort_order, 10) || row.sort_order))
+      : row.sort_order
+    const r = await pool.query(
+      `UPDATE home_slides
+       SET eyebrow = $1, title = $2, subtitle = $3, image = $4, button_label = $5, button_link = $6, sort_order = $7, status = $8
+       WHERE id = $9
+       RETURNING id, eyebrow, title, subtitle, image, button_label, button_link, sort_order, status`,
+      [
+        req.body?.eyebrow != null ? String(req.body.eyebrow).trim() || null : row.eyebrow,
+        title,
+        req.body?.subtitle != null ? String(req.body.subtitle).trim() || null : row.subtitle,
+        image,
+        req.body?.button_label != null ? String(req.body.button_label).trim() || null : row.button_label,
+        req.body?.button_link != null ? String(req.body.button_link).trim() || '/rooms' : row.button_link,
+        order,
+        status,
+        req.params.id,
+      ]
+    )
+    await writeAudit(req, { action: 'update', entity: 'home_slide', entityId: r.rows[0].id, summary: `Updated homepage slide “${r.rows[0].title}” (${status})` })
+    res.json(mapSlide(r.rows[0]))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/slides/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const r = await pool.query('DELETE FROM home_slides WHERE id = $1 RETURNING id, title', [req.params.id])
+    if (!r.rows[0]) return res.status(404).json({ error: 'Slide not found.' })
+    await writeAudit(req, { action: 'delete', entity: 'home_slide', entityId: r.rows[0].id, summary: `Removed homepage slide “${r.rows[0].title}”` })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
 pool.query('SELECT 1').then(async () => {
@@ -4095,6 +4240,7 @@ pool.query('SELECT 1').then(async () => {
   await ensurePayrollExpenseLink()
   await ensureGuestTables()
   await ensureAnalyticsTables()
+  await ensureHomeSlides()
   await ensureAuditTable()
   await ensureUserSecurity()
   app.listen(PORT, () => {
