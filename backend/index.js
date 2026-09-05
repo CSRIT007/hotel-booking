@@ -49,18 +49,32 @@ const uploadsDir = join(__dirname, 'uploads')
 mkdirSync(uploadsDir, { recursive: true })
 app.use('/uploads', express.static(uploadsDir))
 
+const IMAGE_EXT = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/pjpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+}
+
 const imageUpload = multer({
   storage: multer.diskStorage({
     destination: uploadsDir,
     filename: (_req, file, cb) => {
-      const ext = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' }[file.mimetype] || '.jpg'
+      const ext = IMAGE_EXT[file.mimetype] || '.jpg'
       cb(null, `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`)
     },
   }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 12 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) cb(null, true)
-    else cb(new Error('Use a JPG, PNG, WebP, or GIF photo.'))
+    const type = String(file.mimetype || '').toLowerCase()
+    const name = String(file.originalname || '').toLowerCase()
+    if (type === 'image/heic' || type === 'image/heif' || name.endsWith('.heic') || name.endsWith('.heif')) {
+      return cb(new Error('Mac/iPhone HEIC photos are not supported. In Photos, export as JPEG, then upload.'))
+    }
+    if (IMAGE_EXT[type] || /\.(jpe?g|png|webp|gif)$/.test(name)) cb(null, true)
+    else cb(new Error('Use a JPG, PNG, WebP, or GIF photo. HEIC and RAW files will not upload.'))
   },
 })
 
@@ -324,7 +338,12 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/upload', (req, res) => {
   if (!requireStaff(req, res)) return
   imageUpload.single('file')(req, res, (err) => {
-    if (err) return res.status(400).json({ error: err.message || 'Upload failed.' })
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Photo is larger than 12 MB. Export a smaller JPEG and try again.' })
+      }
+      return res.status(400).json({ error: err.message || 'Upload failed.' })
+    }
     if (!req.file) return res.status(400).json({ error: 'Choose a photo to upload.' })
     res.status(201).json({ url: `/uploads/${req.file.filename}` })
   })

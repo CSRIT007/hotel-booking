@@ -15,9 +15,10 @@
               <option v-for="img in photoChoices" :key="img.value" :value="img.value">{{ img.label }}</option>
             </select>
             <label class="mt-2 flex cursor-pointer items-center justify-center rounded-md border border-dashed border-stone-300 px-3 py-2 text-xs text-stone-600 hover:bg-stone-50">
-              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" :disabled="uploading" @change="onUpload" />
-              {{ uploading ? 'Uploading…' : 'Upload a photo' }}
+              <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" class="hidden" :disabled="uploading" @change="onUpload" />
+              {{ uploading ? 'Uploading to the server…' : 'Upload a photo' }}
             </label>
+            <p class="mt-1 text-[11px] leading-snug text-stone-500">JPG, PNG, WebP, or GIF, up to 12 MB. Mac Photos HEIC will not upload — export as JPEG first.</p>
             <div class="mt-2 h-28 rounded-lg bg-stone-200 bg-cover bg-center" :style="{ backgroundImage: `url(${form.image})` }" />
           </div>
           <div>
