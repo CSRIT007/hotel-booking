@@ -4,8 +4,8 @@
       ref="inputEl"
       v-model="query"
       type="text"
-      :placeholder="placeholder"
-      class="w-full rounded-full border border-stone-300 bg-stone-50 px-4 py-1.5 text-sm text-stone-800 shadow-sm outline-none ring-0 placeholder:text-stone-400 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-200 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-400 dark:focus:border-brand-400 dark:focus:bg-stone-800"
+      placeholder="Search"
+      class="w-full rounded-full border border-stone-300 bg-stone-50 py-1.5 pl-4 pr-14 text-sm text-stone-800 shadow-sm outline-none ring-0 placeholder:text-stone-400 focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-200 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:placeholder:text-stone-400 dark:focus:border-brand-400 dark:focus:bg-stone-800"
       aria-label="Search the manage portal"
       @focus="open = true"
       @keydown.down.prevent="move(1)"
@@ -13,6 +13,10 @@
       @keydown.enter.prevent="go(activeIndex >= 0 ? matches[activeIndex] : matches[0])"
       @keydown.escape="close"
     />
+    <kbd
+      v-show="!query.trim()"
+      class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md border border-stone-300 bg-white px-1.5 py-0.5 text-[10px] font-medium leading-none text-stone-500 dark:border-stone-600 dark:bg-stone-700 dark:text-stone-300"
+    >{{ shortcut }}</kbd>
     <ul
       v-if="open && query.trim() && matches.length"
       class="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-auto rounded-2xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900"
@@ -85,7 +89,7 @@ const open = ref(false)
 const activeIndex = ref(0)
 const inputEl = ref(null)
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent)
-const placeholder = isMac ? 'Search  ⌘K' : 'Search  Ctrl+K'
+const shortcut = isMac ? '⌘K' : 'Ctrl+K'
 
 const matches = computed(() => {
   const q = query.value.trim().toLowerCase()

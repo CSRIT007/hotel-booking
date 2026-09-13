@@ -3,46 +3,50 @@
     <h1 class="text-2xl font-semibold text-stone-800">Dashboard</h1>
     <p class="mt-1 text-stone-600">Summary of bookings, revenue and rooms.</p>
 
-    <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" style="perspective: 1100px">
       <router-link
         v-for="item in shortcutItems"
         :key="item.to"
         :to="item.to"
-        class="rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 shadow-sm hover:border-brand-400 hover:text-brand-700"
+        class="dash-box rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 hover:border-brand-400 hover:text-brand-700"
+        @mousemove="tiltBox"
+        @mouseleave="untiltBox"
       >
         {{ item.label }}
         <span class="mt-1 block text-xs font-normal text-stone-500">{{ item.hint }}</span>
       </router-link>
     </div>
 
-    <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
+    <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" style="perspective: 1100px">
+      <div class="dash-box rounded-xl border border-blue-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
         <p class="text-xs font-medium uppercase text-stone-500">Pending requests</p>
         <p class="mt-1 text-2xl font-bold text-blue-600">{{ counts.pending }}</p>
-        <router-link to="/admin/bookings?status=pending" class="mt-2 text-sm text-blue-600 hover:underline">View</router-link>
+        <router-link to="/admin/bookings?status=pending" class="relative z-10 mt-2 text-sm text-blue-600 hover:underline">View</router-link>
       </div>
-      <div class="rounded-xl border border-green-200 bg-white p-4 shadow-sm">
+      <div class="dash-box rounded-xl border border-green-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
         <p class="text-xs font-medium uppercase text-stone-500">Revenue</p>
         <p class="mt-1 text-2xl font-bold text-green-600">{{ formatMoney(totalRevenue) }}</p>
-        <router-link to="/admin/bookings" class="mt-2 text-sm text-green-600 hover:underline">Bookings</router-link>
+        <router-link to="/admin/bookings" class="relative z-10 mt-2 text-sm text-green-600 hover:underline">Bookings</router-link>
       </div>
-      <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div class="dash-box rounded-xl border border-stone-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
         <p class="text-xs font-medium uppercase text-stone-500">Rooms</p>
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ roomCounts.available }} / {{ roomCounts.total }}</p>
-        <router-link to="/admin/rooms" class="mt-2 text-sm text-stone-600 hover:underline">Add / remove rooms</router-link>
+        <router-link to="/admin/rooms" class="relative z-10 mt-2 text-sm text-stone-600 hover:underline">Add / remove rooms</router-link>
       </div>
       <div
-        class="rounded-xl border bg-white p-4 shadow-sm"
+        class="dash-box rounded-xl border bg-white p-4"
         :class="newMessages > 0 ? 'border-red-200' : 'border-stone-200'"
+        @mousemove="tiltBox"
+        @mouseleave="untiltBox"
       >
         <p class="text-xs font-medium uppercase text-stone-500">New messages</p>
         <p class="mt-1 text-2xl font-bold" :class="newMessages > 0 ? 'text-red-600' : 'text-stone-800'">{{ newMessages }}</p>
-        <router-link to="/admin/contacts" class="mt-2 text-sm hover:underline" :class="newMessages > 0 ? 'text-red-600' : 'text-stone-600'">Open inbox</router-link>
+        <router-link to="/admin/contacts" class="relative z-10 mt-2 text-sm hover:underline" :class="newMessages > 0 ? 'text-red-600' : 'text-stone-600'">Open inbox</router-link>
       </div>
     </div>
 
     <!-- Bookings by status -->
-    <div class="mt-8 rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
+    <div class="dash-box mt-8 rounded-xl border border-stone-200 bg-white p-6" @mousemove="tiltBox" @mouseleave="untiltBox">
       <h2 class="font-semibold text-stone-800">Bookings by status</h2>
       <div class="mt-5 space-y-4">
         <router-link
@@ -65,7 +69,7 @@
     </div>
 
     <!-- Recent bookings table -->
-    <div class="mt-8 rounded-xl border border-stone-200 bg-white shadow-sm">
+    <div class="dash-box mt-8 overflow-hidden rounded-xl border border-stone-200 bg-white" @mousemove="tiltBox" @mouseleave="untiltBox">
       <div class="border-b border-stone-200 px-4 py-3 flex justify-between items-center">
         <h2 class="font-semibold text-stone-800">Recent bookings</h2>
         <router-link to="/admin/bookings" class="text-sm text-brand-600 hover:underline">View all</router-link>
@@ -107,7 +111,7 @@
       <p v-if="loading" class="p-4 text-center text-stone-500">Loading…</p>
     </div>
 
-    <div class="mt-8 rounded-xl border border-stone-200 bg-white p-6 shadow-sm">
+    <div class="dash-box mt-8 rounded-xl border border-stone-200 bg-white p-6" @mousemove="tiltBox" @mouseleave="untiltBox">
       <h2 class="font-semibold text-stone-800">Quick links</h2>
       <div class="mt-3 space-y-3 text-sm">
         <div
@@ -217,6 +221,24 @@ const roomCounts = computed(() => {
 })
 
 const recentBookings = computed(() => bookings.value.slice(0, 5))
+
+const reduceMotion =
+  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+function tiltBox(e) {
+  if (reduceMotion) return
+  const el = e.currentTarget
+  const r = el.getBoundingClientRect()
+  const px = (e.clientX - r.left) / r.width
+  const py = (e.clientY - r.top) / r.height
+  el.style.setProperty('--rx', `${((0.5 - py) * 10).toFixed(2)}deg`)
+  el.style.setProperty('--ry', `${((px - 0.5) * 12).toFixed(2)}deg`)
+}
+
+function untiltBox(e) {
+  e.currentTarget.style.setProperty('--rx', '0deg')
+  e.currentTarget.style.setProperty('--ry', '0deg')
+}
 
 onMounted(async () => {
   loading.value = true
