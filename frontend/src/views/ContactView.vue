@@ -14,7 +14,7 @@
           <div class="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-stone-200">
             <h2 class="font-display text-xl font-semibold text-stone-800">Visit or write</h2>
             <p class="mt-3 leading-relaxed text-stone-600">
-              Smile Hotel<br />
+              Smile Hotel MS<br />
               Head office: Sangkat Tul Kok, Khan Tul Kok<br />
               Phnom Penh, Cambodia
             </p>

@@ -16,9 +16,9 @@
         />
         <div>
           <p class="text-sm font-medium uppercase tracking-widest text-brand-600">Our story</p>
-          <h2 class="mt-2 font-display text-3xl font-semibold text-stone-800">Welcome to Smile Hotel</h2>
+          <h2 class="mt-2 font-display text-3xl font-semibold text-stone-800">Welcome to Smile Hotel MS</h2>
           <p class="mt-4 text-lg leading-relaxed text-stone-600">
-            Smile Hotel is a small city hotel in Phnom Penh. We opened so visitors could book a clean room online, arrive with a confirmed stay, and rest without fuss.
+            Smile Hotel MS is a small city hotel in Phnom Penh. We opened so visitors could book a clean room online, arrive with a confirmed stay, and rest without fuss.
           </p>
           <p class="mt-4 leading-relaxed text-stone-600">
             Whether you are here for meetings, a family visit, or a few days in the capital, the front desk, housekeeping, and maintenance teams work from one system so your room is ready when you are.

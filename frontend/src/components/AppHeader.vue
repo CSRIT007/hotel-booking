@@ -2,7 +2,7 @@
   <header class="sticky top-0 z-50 border-b border-stone-200/80 bg-warm-50/95 backdrop-blur-sm dark:border-stone-700 dark:bg-stone-950/95">
     <div class="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
       <router-link to="/" class="font-display text-xl font-semibold text-brand-700 dark:text-brand-300">
-        Smile Hotel
+        Smile Hotel MS
       </router-link>
 
       <nav class="hidden flex-1 items-center justify-center gap-6 text-sm font-medium lg:flex">

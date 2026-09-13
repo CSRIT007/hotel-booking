@@ -3,7 +3,7 @@
     <div class="mx-auto max-w-6xl px-4 sm:px-6">
       <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
         <div class="lg:col-span-2">
-          <h3 class="font-display text-xl font-semibold text-white">Smile Hotel</h3>
+          <h3 class="font-display text-xl font-semibold text-white">Smile Hotel MS</h3>
           <p class="mt-3 max-w-sm text-sm leading-relaxed text-stone-400">
             Comfortable rooms and warm hospitality in Phnom Penh.
           </p>
@@ -25,7 +25,7 @@
         </div>
       </div>
       <p class="mt-10 border-t border-white/10 pt-6 text-center text-sm text-stone-500">
-        © {{ new Date().getFullYear() }} Smile Hotel. All rights reserved.
+        © {{ new Date().getFullYear() }} Smile Hotel MS. All rights reserved.
       </p>
     </div>
   </footer>

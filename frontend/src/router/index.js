@@ -61,7 +61,7 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const title = to.meta.title ?? (to.matched[to.matched.length - 1]?.meta?.title)
-  document.title = title ? `${title} — Smile Hotel` : 'Smile Hotel'
+  document.title = title ? `${title} — Smile Hotel MS` : 'Smile Hotel MS'
   const { isLoggedIn, isStaff } = useAuth()
   if (to.meta.guestOnly && isLoggedIn.value) {
     next({ name: 'Home' })

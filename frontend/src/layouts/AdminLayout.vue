@@ -6,7 +6,7 @@
       :class="{ '-translate-x-full': !sidebarOpen }"
     >
       <div class="flex h-14 items-center justify-between border-b border-stone-700 px-4">
-        <router-link to="/admin" class="font-semibold text-white">Smile Hotel</router-link>
+        <router-link to="/admin" class="font-semibold text-white">Smile Hotel MS</router-link>
         <button type="button" class="lg:hidden rounded p-2 hover:bg-stone-700" @click="sidebarOpen = false" aria-label="Close menu">
           <span class="text-lg">×</span>
         </button>
@@ -144,6 +144,8 @@
         <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100 dark:hover:bg-stone-800" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
         <h1 class="text-lg font-semibold text-stone-800">{{ route.meta.title || 'Admin' }}</h1>
         <div class="ml-auto flex items-center gap-3">
+          <AdminNavSearch class="hidden sm:block" />
+          <div class="hidden w-[5cm] shrink-0 sm:block" aria-hidden="true" />
           <router-link
             v-if="pendingBookings > 0"
             to="/admin/bookings?status=pending"
@@ -202,6 +204,7 @@ import { useAuth } from '../composables/useAuth'
 import { useStaffAlerts } from '../composables/useStaffAlerts'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
+import AdminNavSearch from '../components/AdminNavSearch.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -255,7 +258,7 @@ function confirmLogout() {
 }
 
 watch([newMessages, () => route.meta.title], () => {
-  const base = route.meta.title ? `${route.meta.title} — Smile Hotel` : 'Smile Hotel'
+  const base = route.meta.title ? `${route.meta.title} — Smile Hotel MS` : 'Smile Hotel MS'
   document.title = newMessages.value > 0 ? `(${newMessages.value}) ${base}` : base
 })
 
