@@ -150,7 +150,7 @@ const shortcutItems = [
   { to: '/admin/maintenance-requests', label: 'Requests', hint: 'Repair and work orders' },
   { to: '/admin/analytics-kpi', label: 'KPI', hint: 'Performance indicators' },
   { to: '/admin/audit-log', label: 'Audit log', hint: 'Who changed what' },
-  { to: '/admin/contacts', label: 'Messages', hint: 'Guest contact inbox' },
+  { to: '/admin/crm-loyalty', label: 'Loyalty', hint: 'Points and member rewards' },
 ]
 
 const quickLinks = [
