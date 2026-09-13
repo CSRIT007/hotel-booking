@@ -18,7 +18,7 @@
               <input type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif" class="hidden" :disabled="uploading" @change="onUpload" />
               {{ uploading ? 'Uploading to the server…' : 'Upload a photo' }}
             </label>
-            <p class="mt-1 text-[11px] leading-snug text-stone-500">JPG, PNG, WebP, or GIF, up to 12 MB. Mac Photos HEIC will not upload — export as JPEG first.</p>
+            <p class="mt-1 text-[11px] leading-snug text-stone-500">JPG, PNG, WebP, or GIF, up to 12 MB. Uploaded photos stay in this list for later slides. On the live server, upload here — a git push from your PC does not copy the photo.</p>
             <div class="mt-2 h-28 rounded-lg bg-stone-200 bg-cover bg-center" :style="{ backgroundImage: `url(${form.image})` }" />
           </div>
           <div>
@@ -112,10 +112,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { PROPERTY_IMAGES } from '../../constants/media'
-import { createSlide, deleteSlide, getSlides, updateSlide, uploadImage } from '../../services/data'
+import { createSlide, deleteSlide, getSlides, getUploadedPhotos, updateSlide, uploadImage } from '../../services/data'
 
 const SLIDE_MAX = 5
 const slides = ref([])
+const uploadedPhotos = ref([])
 const loading = ref(true)
 const saving = ref(false)
 const uploading = ref(false)
@@ -125,9 +126,20 @@ const editingId = ref(null)
 const form = reactive(emptyForm())
 
 const photoChoices = computed(() => {
-  const list = [...PROPERTY_IMAGES]
-  if (form.image && !list.some((img) => img.value === form.image)) {
-    list.unshift({ value: form.image, label: 'Uploaded photo' })
+  const seen = new Set()
+  const list = []
+  for (const img of PROPERTY_IMAGES) {
+    if (seen.has(img.value)) continue
+    seen.add(img.value)
+    list.push(img)
+  }
+  for (const img of uploadedPhotos.value) {
+    if (!img?.value || seen.has(img.value)) continue
+    seen.add(img.value)
+    list.push(img)
+  }
+  if (form.image && !seen.has(form.image) && String(form.image).startsWith('/uploads/')) {
+    list.push({ value: form.image, label: 'Uploaded photo' })
   }
   return list
 })
@@ -153,7 +165,9 @@ function resetForm() {
 async function load() {
   loading.value = true
   try {
-    slides.value = await getSlides({ all: true })
+    const [rows, photos] = await Promise.all([getSlides({ all: true }), getUploadedPhotos()])
+    slides.value = rows
+    uploadedPhotos.value = photos
   } catch (e) {
     error.value = e.message
   }
@@ -183,8 +197,13 @@ async function onUpload(e) {
   error.value = ''
   uploading.value = true
   try {
-    const { url } = await uploadImage(file)
-    form.image = url
+    const data = await uploadImage(file)
+    form.image = data.url
+    const photos = Array.isArray(data.photos) ? [...data.photos] : []
+    if (data.url && !photos.some((img) => img.value === data.url)) {
+      photos.unshift({ value: data.url, label: 'Uploaded photo' })
+    }
+    uploadedPhotos.value = photos
   } catch (err) {
     error.value = err.message || 'Could not upload photo.'
   }

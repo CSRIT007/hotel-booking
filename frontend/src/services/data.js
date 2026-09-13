@@ -76,6 +76,16 @@ export async function uploadImage(file) {
   return requireLocal(() => localApi.uploadImage(file), 'Failed to upload photo')
 }
 
+export async function getUploadedPhotos() {
+  if (!hasLocalApi) return []
+  try {
+    return await localApi.getUploadedPhotos()
+  } catch (e) {
+    console.warn('Local API getUploadedPhotos failed:', e.message)
+    return []
+  }
+}
+
 export async function updateHotel(id, payload) {
   if (hasLocalApi) return await localApi.updateHotel(id, payload)
   throw new Error('No API configured')

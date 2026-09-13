@@ -744,6 +744,15 @@ export async function createGuestSatisfaction(payload) {
   }
 }
 
+export async function getUploadedPhotos() {
+  try {
+    const { data } = await client.get('/api/uploads')
+    return Array.isArray(data) ? data : []
+  } catch (e) {
+    throwApiError(e, 'Failed to load uploaded photos')
+  }
+}
+
 export async function getSlides(params = {}) {
   const { data } = await client.get('/api/slides', { params })
   return Array.isArray(data) ? data : []

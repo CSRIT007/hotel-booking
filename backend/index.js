@@ -10,7 +10,7 @@ import pg from 'pg'
 import bcrypt from 'bcrypt'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { readFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, existsSync, mkdirSync, readdirSync } from 'fs'
 import crypto from 'crypto'
 import multer from 'multer'
 
@@ -54,8 +54,36 @@ const IMAGE_EXT = {
   'image/jpg': '.jpg',
   'image/pjpeg': '.jpg',
   'image/png': '.png',
+  'image/x-png': '.png',
   'image/webp': '.webp',
   'image/gif': '.gif',
+}
+
+function isAllowedImageName(name) {
+  return /\.(jpe?g|jfif|png|webp|gif)$/i.test(String(name || ''))
+}
+
+function photoFromFilename(filename) {
+  const value = `/uploads/${filename}`
+  const short = String(filename).replace(/\.[^.]+$/, '').slice(-6)
+  return { value, label: `Uploaded ${short}` }
+}
+
+async function listUploadedPhotos(extraUrl) {
+  if (!existsSync(uploadsDir)) return []
+  let used = new Set()
+  try {
+    const r = await pool.query(`SELECT DISTINCT image FROM home_slides WHERE image LIKE '/uploads/%'`)
+    used = new Set(r.rows.map((row) => row.image))
+  } catch {
+    /* table may not exist yet */
+  }
+  if (extraUrl) used.add(extraUrl)
+  return readdirSync(uploadsDir)
+    .filter((name) => isAllowedImageName(name) && name !== '.gitkeep')
+    .map(photoFromFilename)
+    .filter((photo) => used.has(photo.value) && existsSync(join(uploadsDir, photo.value.replace('/uploads/', ''))))
+    .sort((a, b) => b.value.localeCompare(a.value))
 }
 
 const imageUpload = multer({
@@ -73,7 +101,7 @@ const imageUpload = multer({
     if (type === 'image/heic' || type === 'image/heif' || name.endsWith('.heic') || name.endsWith('.heif')) {
       return cb(new Error('Mac/iPhone HEIC photos are not supported. In Photos, export as JPEG, then upload.'))
     }
-    if (IMAGE_EXT[type] || /\.(jpe?g|png|webp|gif)$/.test(name)) cb(null, true)
+    if (IMAGE_EXT[type] || isAllowedImageName(name)) cb(null, true)
     else cb(new Error('Use a JPG, PNG, WebP, or GIF photo. HEIC and RAW files will not upload.'))
   },
 })
@@ -337,7 +365,7 @@ app.post('/api/auth/register', async (req, res) => {
 // ----- Data -----
 app.post('/api/upload', (req, res) => {
   if (!requireStaff(req, res)) return
-  imageUpload.single('file')(req, res, (err) => {
+  imageUpload.single('file')(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({ error: 'Photo is larger than 12 MB. Export a smaller JPEG and try again.' })
@@ -345,8 +373,18 @@ app.post('/api/upload', (req, res) => {
       return res.status(400).json({ error: err.message || 'Upload failed.' })
     }
     if (!req.file) return res.status(400).json({ error: 'Choose a photo to upload.' })
-    res.status(201).json({ url: `/uploads/${req.file.filename}` })
+    const url = `/uploads/${req.file.filename}`
+    res.status(201).json({ url, photos: await listUploadedPhotos(url) })
   })
+})
+
+app.get('/api/uploads', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    res.json(await listUploadedPhotos())
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Could not list uploaded photos.' })
+  }
 })
 
 app.get('/api/hotels', async (_req, res) => {
