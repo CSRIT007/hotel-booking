@@ -13,5 +13,8 @@
     "express": "^4.18.2",
     "multer": "^2.3.0",
     "pg": "^8.11.3"
+  },
+  "allowScripts": {
+    "bcrypt@5.1.1": true
   }
 }

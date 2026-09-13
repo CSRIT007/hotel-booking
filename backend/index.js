@@ -4101,7 +4101,7 @@ app.post('/api/analytics/satisfaction', async (req, res) => {
   }
 })
 
-const SLIDE_MAX = 3
+const SLIDE_MAX = 5
 
 async function ensureHomeSlides() {
   await pool.query(`
@@ -4113,11 +4113,13 @@ async function ensureHomeSlides() {
       image VARCHAR(255) NOT NULL,
       button_label VARCHAR(80),
       button_link VARCHAR(200),
-      sort_order INT NOT NULL DEFAULT 1 CHECK (sort_order BETWEEN 1 AND 3),
+      sort_order INT NOT NULL DEFAULT 1 CHECK (sort_order BETWEEN 1 AND 5),
       status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `)
+  await pool.query('ALTER TABLE home_slides DROP CONSTRAINT IF EXISTS home_slides_sort_order_check')
+  await pool.query('ALTER TABLE home_slides ADD CONSTRAINT home_slides_sort_order_check CHECK (sort_order BETWEEN 1 AND 5)')
   const existing = await pool.query('SELECT 1 FROM home_slides LIMIT 1')
   if (!existing.rows.length) {
     await pool.query(
@@ -4167,7 +4169,7 @@ app.post('/api/slides', async (req, res) => {
   try {
     const count = await pool.query('SELECT COUNT(*)::int AS n FROM home_slides')
     if (Number(count.rows[0].n) >= SLIDE_MAX) {
-      return res.status(400).json({ error: 'You can keep 3 slides. Edit or inactivate one, or remove it first.' })
+      return res.status(400).json({ error: 'You can keep 5 slides. Edit or inactivate one, or remove it first.' })
     }
     const { eyebrow, title, subtitle, image, button_label, button_link, sort_order, status } = req.body || {}
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required.' })
