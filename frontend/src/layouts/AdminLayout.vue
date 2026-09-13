@@ -139,7 +139,7 @@
       </div>
     </aside>
 
-    <div class="flex flex-1 flex-col lg:ml-64">
+    <div class="flex min-w-0 flex-1 flex-col pb-10 lg:ml-64">
       <header class="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-stone-200 bg-white px-4 dark:border-stone-800 dark:bg-stone-900">
         <button type="button" class="rounded p-2 lg:hidden hover:bg-stone-100 dark:hover:bg-stone-800" @click="sidebarOpen = true" aria-label="Open menu">☰</button>
         <h1 class="text-lg font-semibold text-stone-800">{{ route.meta.title || 'Admin' }}</h1>
@@ -179,6 +179,9 @@
         </div>
         <router-view />
       </main>
+      <footer class="pointer-events-none fixed bottom-0 left-0 right-0 z-20 border-t border-stone-200 bg-white px-3 py-2 text-center text-[11px] leading-snug text-stone-500 lg:left-64 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-400">
+        All reserved © {{ year }} Designed by Chea Saroeurn Tel: +855 98 944 686
+      </footer>
     </div>
   </div>
   <ConfirmModal
@@ -208,6 +211,7 @@ const sidebarOpen = ref(true)
 const openGroup = ref('')
 const showLogoutConfirm = ref(false)
 const isDashboard = computed(() => route.name === 'AdminDashboard')
+const year = new Date().getFullYear()
 
 function isActive(path) {
   return route.path === path || route.path.startsWith(`${path}/`)

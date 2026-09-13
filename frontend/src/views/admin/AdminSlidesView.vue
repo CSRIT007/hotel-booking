@@ -2,7 +2,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Slideshow</h1>
     <p class="mt-1 text-stone-600">
-      The home page shows up to 3 active slides. Words run in from the left. Inactivate a slide to hide it without deleting the photo.
+      The home page shows up to 5 active slides. Use Inactive to hide a slide without deleting it. Active slides can be 5 or fewer.
     </p>
 
     <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -47,9 +47,7 @@
             <div>
               <label class="block text-xs font-medium text-stone-700">Order</label>
               <select v-model.number="form.sort_order" class="field">
-                <option :value="1">1</option>
-                <option :value="2">2</option>
-                <option :value="3">3</option>
+                <option v-for="n in SLIDE_MAX" :key="n" :value="n">{{ n }}</option>
               </select>
             </div>
             <div>
@@ -64,12 +62,12 @@
         <p v-if="error" class="mt-3 text-sm text-red-600">{{ error }}</p>
         <p v-if="success" class="mt-3 text-sm text-green-600">{{ success }}</p>
         <div class="mt-4 flex gap-2">
-          <button type="submit" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700" :disabled="saving || (!editingId && slides.length >= 3)">
+          <button type="submit" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700" :disabled="saving || (!editingId && slides.length >= SLIDE_MAX)">
             {{ saving ? 'Saving…' : editingId ? 'Save changes' : 'Add slide' }}
           </button>
           <button v-if="editingId" type="button" class="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-700" @click="resetForm">Cancel</button>
         </div>
-        <p v-if="!editingId && slides.length >= 3" class="mt-2 text-xs text-stone-500">Three slides are in use. Edit one, or remove it to add another.</p>
+        <p v-if="!editingId && slides.length >= SLIDE_MAX" class="mt-2 text-xs text-stone-500">Five slides are in use. Edit one, or remove it to add another.</p>
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
@@ -116,6 +114,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { PROPERTY_IMAGES } from '../../constants/media'
 import { createSlide, deleteSlide, getSlides, updateSlide, uploadImage } from '../../services/data'
 
+const SLIDE_MAX = 5
 const slides = ref([])
 const loading = ref(true)
 const saving = ref(false)
