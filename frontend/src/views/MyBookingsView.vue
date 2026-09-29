@@ -50,8 +50,14 @@
             <p v-else-if="b.status === 'confirmed'" class="mt-3 text-sm text-green-700">
               Your booking is confirmed and ready. Please arrive on your check-in date.
             </p>
+            <p v-else-if="b.status === 'in_house'" class="mt-3 text-sm text-sky-700">
+              You are checked in. Enjoy your stay.
+            </p>
             <p v-else-if="b.status === 'cancelled'" class="mt-3 text-sm text-red-700">
               This booking was cancelled. You can request another room anytime.
+            </p>
+            <p v-else-if="b.status === 'no_show'" class="mt-3 text-sm text-red-700">
+              Marked as no-show. The hotel released those dates.
             </p>
           </div>
         </div>
@@ -84,15 +90,18 @@ const latestNotice = computed(() => notices.value.find((n) => Number(n.is_read) 
 function statusLabel(status) {
   if (status === 'pending') return 'Waiting for confirmation'
   if (status === 'confirmed') return 'Confirmed — ready'
+  if (status === 'in_house') return 'Checked in'
   if (status === 'cancelled') return 'Cancelled'
+  if (status === 'no_show') return 'No-show'
   if (status === 'completed') return 'Completed'
   return status
 }
 
 function statusClass(status) {
   if (status === 'pending') return 'bg-amber-100 text-amber-800'
+  if (status === 'in_house') return 'bg-sky-100 text-sky-800'
   if (status === 'confirmed' || status === 'completed') return 'bg-green-100 text-green-800'
-  if (status === 'cancelled') return 'bg-red-100 text-red-800'
+  if (status === 'cancelled' || status === 'no_show') return 'bg-red-100 text-red-800'
   return 'bg-stone-100 text-stone-600'
 }
 

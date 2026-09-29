@@ -112,8 +112,12 @@ export async function deleteRoom(id) {
 }
 
 export async function createBooking(payload) {
-  const { data } = await client.post('/api/bookings', payload)
-  return data
+  try {
+    const { data } = await client.post('/api/bookings', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Booking failed')
+  }
 }
 
 export async function getTestimonials() {
@@ -137,9 +141,62 @@ export async function getAllBookings() {
   return Array.isArray(data) ? data : []
 }
 
+export async function updateBooking(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/bookings/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update booking')
+  }
+}
+
 export async function updateBookingStatus(id, status) {
-  const { data } = await client.patch(`/api/bookings/${id}`, { status })
-  return data
+  return updateBooking(id, { status })
+}
+
+export async function getBooking(id) {
+  try {
+    const { data } = await client.get(`/api/bookings/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to load stay')
+  }
+}
+
+export async function checkInBooking(id, payload) {
+  try {
+    const { data } = await client.post(`/api/bookings/${id}/check-in`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Check-in failed')
+  }
+}
+
+export async function addFolioItem(id, payload) {
+  try {
+    const { data } = await client.post(`/api/bookings/${id}/folio`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add folio line')
+  }
+}
+
+export async function deleteFolioItem(id, itemId) {
+  try {
+    const { data } = await client.delete(`/api/bookings/${id}/folio/${itemId}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to remove folio line')
+  }
+}
+
+export async function checkOutBooking(id, payload) {
+  try {
+    const { data } = await client.post(`/api/bookings/${id}/check-out`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Check-out failed')
+  }
 }
 
 export async function getContacts() {

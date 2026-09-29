@@ -2,7 +2,7 @@
  * Finance calculations shared by Revenue, Expenses, and Profit admin pages.
  *
  * Recognized revenue:
- *   rooms = confirmed + completed bookings
+ *   rooms = confirmed + in-house + completed bookings
  *   POS   = paid transactions (refunded excluded)
  * Expenses: all recorded expense rows
  * Profit  = recognized revenue − expenses
@@ -96,7 +96,7 @@ export function dateRangePresets(now = new Date()) {
 }
 
 export function isRoomRevenue(booking) {
-  return booking.status === 'confirmed' || booking.status === 'completed'
+  return booking.status === 'confirmed' || booking.status === 'in_house' || booking.status === 'completed'
 }
 
 export function isPosRevenue(tx) {

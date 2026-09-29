@@ -159,17 +159,13 @@ export async function deleteRoom(id) {
 
 export async function createBooking(payload) {
   if (hasLocalApi) {
-    try {
-      return await localApi.createBooking(payload)
-    } catch (e) {
-      throw new Error(e.response?.data?.message || e.message || 'Booking failed')
-    }
+    return await localApi.createBooking(payload)
   }
   if (hasTadabase) {
     try {
       return await tadabase.createBooking(payload)
     } catch (e) {
-      throw new Error(e.response?.data?.message || e.message || 'Booking failed')
+      throw new Error(e.response?.data?.error || e.message || 'Booking failed')
     }
   }
   return { id: Date.now(), ...payload, status: 'pending' }
@@ -402,13 +398,42 @@ export async function getPosTransactions(params = {}) {
   return []
 }
 
-export async function updateBookingStatus(id, status) {
+export async function updateBooking(id, payload) {
   if (hasLocalApi) {
-    return await localApi.updateBookingStatus(id, status)
+    return await localApi.updateBooking(id, payload)
   }
   if (hasTadabase) {
-    return await tadabase.updateBookingStatus(id, status)
+    return await tadabase.updateBookingStatus(id, payload.status)
   }
+  throw new Error('No API configured')
+}
+
+export async function updateBookingStatus(id, status) {
+  return updateBooking(id, { status })
+}
+
+export async function getBooking(id) {
+  if (hasLocalApi) return await localApi.getBooking(id)
+  throw new Error('No API configured')
+}
+
+export async function checkInBooking(id, payload) {
+  if (hasLocalApi) return await localApi.checkInBooking(id, payload)
+  throw new Error('No API configured')
+}
+
+export async function addFolioItem(id, payload) {
+  if (hasLocalApi) return await localApi.addFolioItem(id, payload)
+  throw new Error('No API configured')
+}
+
+export async function deleteFolioItem(id, itemId) {
+  if (hasLocalApi) return await localApi.deleteFolioItem(id, itemId)
+  throw new Error('No API configured')
+}
+
+export async function checkOutBooking(id, payload) {
+  if (hasLocalApi) return await localApi.checkOutBooking(id, payload)
   throw new Error('No API configured')
 }
 

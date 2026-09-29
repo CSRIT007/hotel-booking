@@ -651,7 +651,9 @@ app.get('/api/bookings', async (req, res) => {
         to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
         to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
         r.name AS room_name, r.price AS room_price,
-        h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
+        h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code,
+        (SELECT COALESCE(SUM(CASE WHEN f.kind = 'charge' THEN f.amount ELSE -f.amount END), 0)
+         FROM booking_folio f WHERE f.booking_id = b.id) AS folio_balance
        FROM bookings b
        JOIN users u ON b.user_id = u.id
        JOIN rooms r ON b.room_id = r.id
@@ -666,62 +668,78 @@ app.get('/api/bookings', async (req, res) => {
 })
 
 app.patch('/api/bookings/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
   try {
-    const { status } = req.body || {}
-    if (!status || !['pending', 'confirmed', 'cancelled', 'completed'].includes(status)) {
+    const body = req.body || {}
+    const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Booking not found' })
+
+    const nextStatus = body.status != null ? String(body.status) : current.status
+    if (!BOOKING_STATUSES.includes(nextStatus)) {
       return res.status(400).json({ error: 'Invalid status.' })
     }
-    const r = await pool.query(
-      'UPDATE bookings SET status = $1 WHERE id = $2 RETURNING *',
-      [status, req.params.id]
-    )
-    if (!r.rows[0]) return res.status(404).json({ error: 'Booking not found' })
-    const booking = r.rows[0]
-
-    if (status === 'confirmed' || status === 'cancelled') {
-      const details = await pool.query(
-        `SELECT r.name AS room_name, h.name AS hotel_name
-         FROM rooms r
-         JOIN hotels h ON r.hotel_id = h.id
-         WHERE r.id = $1`,
-        [booking.room_id]
-      )
-      const roomName = details.rows[0]?.room_name || 'your room'
-      const hotelName = details.rows[0]?.hotel_name || ''
-      const message =
-        status === 'confirmed'
-          ? `Your booking for ${roomName}${hotelName ? ` at ${hotelName}` : ''} is confirmed and ready.`
-          : `Your booking for ${roomName} has been cancelled.`
-      await pool.query(
-        `INSERT INTO notifications (user_id, booking_id, type, message, is_read)
-         VALUES ($1, $2, $3, $4, 0)`,
-        [booking.user_id, booking.id, status, message]
-      )
+    if (nextStatus === 'in_house' || nextStatus === 'completed') {
+      return res.status(400).json({ error: 'Use check-in and check-out on the stay folio.' })
+    }
+    if (nextStatus === 'no_show' && current.status !== 'confirmed') {
+      return res.status(400).json({ error: 'Only a confirmed stay can be marked no-show.' })
+    }
+    if (nextStatus === 'cancelled' && !['pending', 'confirmed'].includes(current.status)) {
+      return res.status(400).json({ error: 'Only a pending or confirmed booking can be cancelled.' })
     }
 
-    if (status === 'confirmed') {
-      await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1", [booking.room_id])
-    } else if (status === 'completed') {
-      await openCheckoutTask(booking.room_id, booking.id)
-      await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status <> 'maintenance'", [booking.room_id])
-      await awardStayPoints(booking)
-    } else if (status === 'cancelled') {
-      const other = await pool.query(
-        `SELECT 1 FROM bookings
-         WHERE room_id = $1 AND id <> $2 AND status IN ('confirmed', 'completed')
-         LIMIT 1`,
-        [booking.room_id, booking.id]
-      )
-      if (!other.rows.length) {
-        await pool.query("UPDATE rooms SET status = 'available' WHERE id = $1 AND status = 'booked'", [booking.room_id])
+    const currentIn = toYmd(current.check_in)
+    const currentOut = toYmd(current.check_out)
+    const nextRoomId = body.room_id != null ? parseInt(body.room_id, 10) : current.room_id
+    const nextIn = body.check_in || currentIn
+    const nextOut = body.check_out || currentOut
+    const nextGuests = body.guests != null ? parseInt(body.guests, 10) : current.guests
+    const datesChanged =
+      Number(nextRoomId) !== Number(current.room_id) ||
+      nextIn !== currentIn ||
+      nextOut !== currentOut ||
+      Number(nextGuests) !== Number(current.guests)
+
+    if (datesChanged && !['pending', 'confirmed', 'in_house'].includes(current.status)) {
+      return res.status(400).json({ error: 'Only pending, confirmed, or in-house stays can change dates.' })
+    }
+
+    let total = current.total_price
+    if (datesChanged) {
+      const quote = await crsQuote(nextRoomId, nextIn, nextOut, current.id)
+      if (quote.error) return res.status(400).json({ error: quote.error })
+      if (nextGuests && quote.max_persons && Number(nextGuests) > Number(quote.max_persons)) {
+        return res.status(400).json({ error: 'Guests exceed room capacity.' })
       }
+      total = quote.total
+    }
+
+    const r = await pool.query(
+      `UPDATE bookings
+       SET status = $1, room_id = $2, check_in = $3, check_out = $4, guests = $5, total_price = $6
+       WHERE id = $7 RETURNING *`,
+      [nextStatus, nextRoomId, nextIn, nextOut, nextGuests || 1, total, current.id]
+    )
+    const booking = r.rows[0]
+
+    if (nextStatus !== current.status) {
+      await applyBookingStatusEffects(booking, nextStatus)
+    } else if (datesChanged) {
+      if (Number(nextRoomId) !== Number(current.room_id)) {
+        await syncRoomHold(current.room_id)
+      }
+      await syncRoomHold(booking.room_id)
+      if (booking.status === 'in_house') await ensureRoomCharge(booking)
     }
 
     await writeAudit(req, {
-      action: status,
+      action: nextStatus !== current.status ? nextStatus : 'update',
       entity: 'booking',
       entityId: booking.id,
-      summary: `Booking #${booking.id} marked ${status}`,
+      summary: datesChanged
+        ? `Booking #${booking.id} dates ${nextIn} → ${nextOut}`
+        : `Booking #${booking.id} marked ${nextStatus}`,
     })
     res.json(booking)
   } catch (e) {
@@ -731,38 +749,232 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const { user_id, room_id, check_in, check_out, guests, status, channel_id } = req.body || {}
-    if (!user_id || !room_id || !check_in || !check_out) {
+    const isStaff = String(req.get('x-user-role') || '') === 'staff'
+    const { user_id, room_id, check_in, check_out, guests, status, channel_id, walk_in_name, walk_in_email } = req.body || {}
+    if (!room_id || !check_in || !check_out) {
       return res.status(400).json({ error: 'Missing required booking fields.' })
     }
+
+    let userId = parseInt(user_id, 10) || 0
+    if (isStaff && String(walk_in_name || '').trim()) {
+      const walkIn = await findOrCreateWalkIn(walk_in_name, walk_in_email)
+      if (walkIn.error) return res.status(400).json({ error: walkIn.error })
+      userId = walkIn.userId
+    }
+    if (!userId) {
+      return res.status(400).json({ error: 'Select a guest or enter a walk-in name.' })
+    }
+    if (!isStaff) {
+      const actor = parseInt(req.get('x-user-id') || 0, 10)
+      if (actor && actor !== userId) {
+        return res.status(403).json({ error: 'You can only book for your own account.' })
+      }
+    }
+
     const quote = await crsQuote(room_id, check_in, check_out)
     if (quote.error) return res.status(400).json({ error: quote.error })
     if (guests && quote.max_persons && Number(guests) > Number(quote.max_persons)) {
       return res.status(400).json({ error: 'Guests exceed room capacity.' })
     }
+
+    let nextStatus = 'pending'
+    if (isStaff && ['pending', 'confirmed'].includes(status)) nextStatus = status
+
     let channelId = channel_id ? parseInt(channel_id, 10) : null
     if (channelId) {
       const ch = await pool.query(`SELECT id FROM crs_channels WHERE id = $1 AND status = 'active'`, [channelId])
       if (!ch.rows[0]) return res.status(400).json({ error: 'That booking channel is not active.' })
     } else {
-      const direct = await pool.query(`SELECT id FROM crs_channels WHERE code = 'direct' LIMIT 1`)
-      channelId = direct.rows[0]?.id || null
+      const code = isStaff && String(walk_in_name || '').trim() ? 'walkin' : 'direct'
+      const ch = await pool.query(`SELECT id FROM crs_channels WHERE code = $1 LIMIT 1`, [code])
+      channelId = ch.rows[0]?.id || null
     }
+
     const r = await pool.query(
       `INSERT INTO bookings (user_id, room_id, check_in, check_out, guests, total_price, status, channel_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [user_id, room_id, check_in, check_out, guests || 1, quote.total, status || 'pending', channelId]
+      [userId, room_id, check_in, check_out, guests || 1, quote.total, nextStatus, channelId]
     )
     const created = r.rows[0]
+    if (nextStatus === 'confirmed') {
+      await applyBookingStatusEffects(created, 'confirmed')
+    }
     await writeAudit(req, {
       action: 'create',
       entity: 'booking',
       entityId: created.id,
-      summary: `Booking request #${created.id}`,
+      summary: nextStatus === 'confirmed' ? `Staff booking #${created.id}` : `Booking request #${created.id}`,
     })
     res.status(201).json(created)
   } catch (e) {
     res.status(500).json({ error: e.message || 'Booking failed' })
+  }
+})
+
+app.get('/api/bookings/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const booking = await loadStaffBooking(req.params.id)
+    if (!booking) return res.status(404).json({ error: 'Booking not found' })
+    res.json(booking)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/bookings/:id/check-in', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Booking not found' })
+    if (current.status !== 'confirmed') {
+      return res.status(400).json({ error: 'Only a confirmed booking can be checked in.' })
+    }
+    const body = req.body || {}
+    const idNumber = String(body.guest_id_number || '').trim()
+    if (idNumber.length < 3) return res.status(400).json({ error: 'Guest ID number is required.' })
+    const idType = ID_TYPES.includes(body.guest_id_type) ? body.guest_id_type : 'national_id'
+    const nextRoomId = body.room_id != null ? parseInt(body.room_id, 10) : current.room_id
+    if (Number(nextRoomId) !== Number(current.room_id)) {
+      const quote = await crsQuote(nextRoomId, toYmd(current.check_in), toYmd(current.check_out), current.id)
+      if (quote.error) return res.status(400).json({ error: quote.error })
+    }
+    const deposit = roundMoney(body.deposit_amount)
+    const method = PAY_METHODS.includes(body.deposit_method) ? body.deposit_method : 'cash'
+    if (deposit < 0) return res.status(400).json({ error: 'Deposit cannot be negative.' })
+
+    const r = await pool.query(
+      `UPDATE bookings
+       SET status = 'in_house', room_id = $1, guest_id_type = $2, guest_id_number = $3, checked_in_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [nextRoomId, idType, idNumber, current.id]
+    )
+    const booking = r.rows[0]
+    await ensureRoomCharge(booking)
+    if (deposit > 0) {
+      await pool.query(
+        `INSERT INTO booking_folio (booking_id, kind, category, description, amount, method)
+         VALUES ($1, 'payment', 'deposit', 'Check-in deposit', $2, $3)`,
+        [booking.id, deposit, method]
+      )
+    }
+    if (Number(nextRoomId) !== Number(current.room_id)) await syncRoomHold(current.room_id)
+    await syncRoomHold(booking.room_id)
+    await writeAudit(req, {
+      action: 'check_in',
+      entity: 'booking',
+      entityId: booking.id,
+      summary: `Checked in booking #${booking.id}`,
+    })
+    res.json(await loadStaffBooking(booking.id))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/bookings/:id/folio', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Booking not found' })
+    if (current.status !== 'in_house') {
+      return res.status(400).json({ error: 'Folio charges can be added while the guest is in-house.' })
+    }
+    const body = req.body || {}
+    const kind = body.kind === 'payment' ? 'payment' : 'charge'
+    const amount = roundMoney(body.amount)
+    if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be greater than 0.' })
+    const description = String(body.description || '').trim()
+    if (!description) return res.status(400).json({ error: 'Description is required.' })
+    let category = String(body.category || 'other')
+    let method = null
+    if (kind === 'charge') {
+      if (category === 'room') return res.status(400).json({ error: 'Room stay is added at check-in.' })
+      if (!FOLIO_CHARGE_CATEGORIES.includes(category)) category = 'other'
+    } else {
+      category = 'payment'
+      method = PAY_METHODS.includes(body.method) ? body.method : 'cash'
+    }
+    await pool.query(
+      `INSERT INTO booking_folio (booking_id, kind, category, description, amount, method)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [current.id, kind, category, description, amount, method]
+    )
+    await writeAudit(req, {
+      action: 'folio',
+      entity: 'booking',
+      entityId: current.id,
+      summary: `${kind} ${amount} on booking #${current.id}`,
+    })
+    res.status(201).json(await loadStaffBooking(current.id))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.delete('/api/bookings/:id/folio/:itemId', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const item = await pool.query(
+      `SELECT * FROM booking_folio WHERE id = $1 AND booking_id = $2`,
+      [req.params.itemId, req.params.id]
+    )
+    if (!item.rows[0]) return res.status(404).json({ error: 'Folio line not found' })
+    if (item.rows[0].category === 'room') {
+      return res.status(400).json({ error: 'The room stay line cannot be removed.' })
+    }
+    const stay = await pool.query('SELECT status FROM bookings WHERE id = $1', [req.params.id])
+    if (stay.rows[0]?.status !== 'in_house') {
+      return res.status(400).json({ error: 'Folio can only be edited while the guest is in-house.' })
+    }
+    await pool.query('DELETE FROM booking_folio WHERE id = $1', [req.params.itemId])
+    res.json(await loadStaffBooking(req.params.id))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/bookings/:id/check-out', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Booking not found' })
+    if (current.status !== 'in_house') {
+      return res.status(400).json({ error: 'Only an in-house guest can be checked out.' })
+    }
+    await ensureRoomCharge(current)
+    const folio = await getFolioSummary(current.id)
+    const pay = roundMoney(req.body?.payment_amount)
+    const method = PAY_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : 'cash'
+    if (folio.folio_balance > 0.009) {
+      if (pay + 0.009 < folio.folio_balance) {
+        return res.status(400).json({
+          error: `Remaining balance is ${folio.folio_balance.toFixed(2)}. Collect payment before check-out.`,
+        })
+      }
+      await pool.query(
+        `INSERT INTO booking_folio (booking_id, kind, category, description, amount, method)
+         VALUES ($1, 'payment', 'payment', 'Check-out settlement', $2, $3)`,
+        [current.id, pay || folio.folio_balance, method]
+      )
+    }
+    const r = await pool.query(
+      `UPDATE bookings SET status = 'completed', checked_out_at = NOW() WHERE id = $1 RETURNING *`,
+      [current.id]
+    )
+    await applyBookingStatusEffects(r.rows[0], 'completed')
+    await writeAudit(req, {
+      action: 'check_out',
+      entity: 'booking',
+      entityId: current.id,
+      summary: `Checked out booking #${current.id}`,
+    })
+    res.json(await loadStaffBooking(current.id))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
   }
 })
 
@@ -2197,7 +2409,7 @@ app.delete('/api/hr/leaves/:id', async (req, res) => {
 async function roomIsOccupied(roomId) {
   const r = await pool.query(
     `SELECT 1 FROM bookings
-     WHERE room_id = $1 AND status = 'confirmed'
+     WHERE room_id = $1 AND status = 'in_house'
        AND check_in <= CURRENT_DATE AND check_out > CURRENT_DATE
      LIMIT 1`,
     [roomId]
@@ -2265,11 +2477,11 @@ async function ensureHousekeepingTables() {
   const due = await pool.query(`
     SELECT b.id, b.room_id
     FROM bookings b
-    WHERE b.status IN ('confirmed', 'completed')
+    WHERE b.status = 'completed'
       AND b.check_out <= CURRENT_DATE
       AND NOT EXISTS (
         SELECT 1 FROM bookings x
-        WHERE x.room_id = b.room_id AND x.status = 'confirmed'
+        WHERE x.room_id = b.room_id AND x.status = 'in_house'
           AND x.check_in <= CURRENT_DATE AND x.check_out > CURRENT_DATE
       )
       AND NOT EXISTS (
@@ -2308,7 +2520,7 @@ app.get('/api/housekeeping', async (req, res) => {
         ON t.room_id = r.id AND t.status IN ('dirty', 'in_progress')
       LEFT JOIN hr_employees e ON e.id = t.assigned_to
       LEFT JOIN bookings s
-        ON s.room_id = r.id AND s.status = 'confirmed'
+        ON s.room_id = r.id AND s.status = 'in_house'
         AND s.check_in <= CURRENT_DATE AND s.check_out > CURRENT_DATE
       ORDER BY h.name, r.name
     `)
@@ -2332,11 +2544,11 @@ async function openDueHousekeeping() {
   const due = await pool.query(`
     SELECT b.id, b.room_id
     FROM bookings b
-    WHERE b.status IN ('confirmed', 'completed')
+    WHERE b.status = 'completed'
       AND b.check_out <= CURRENT_DATE
       AND NOT EXISTS (
         SELECT 1 FROM bookings x
-        WHERE x.room_id = b.room_id AND x.status = 'confirmed'
+        WHERE x.room_id = b.room_id AND x.status = 'in_house'
           AND x.check_in <= CURRENT_DATE AND x.check_out > CURRENT_DATE
       )
       AND NOT EXISTS (
@@ -2496,6 +2708,192 @@ async function ensureCrsTables() {
   `)
 }
 
+const BOOKING_STATUSES = ['pending', 'confirmed', 'in_house', 'cancelled', 'completed', 'no_show']
+const HOLDING_STATUSES = ['pending', 'confirmed', 'in_house']
+const PAY_METHODS = ['cash', 'bank', 'card']
+const ID_TYPES = ['national_id', 'passport', 'other']
+const FOLIO_CHARGE_CATEGORIES = ['room', 'minibar', 'laundry', 'fnb', 'other']
+
+function toYmd(value) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.slice(0, 10)
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return ymd(value)
+  return String(value).slice(0, 10)
+}
+
+async function ensureBookingOps() {
+  await pool.query(`
+    DO $$
+    DECLARE c name;
+    BEGIN
+      FOR c IN
+        SELECT conname FROM pg_constraint
+        WHERE conrelid = 'bookings'::regclass AND contype = 'c'
+          AND pg_get_constraintdef(oid) ILIKE '%status%'
+      LOOP
+        EXECUTE format('ALTER TABLE bookings DROP CONSTRAINT %I', c);
+      END LOOP;
+      ALTER TABLE bookings ADD CONSTRAINT bookings_status_check
+        CHECK (status IN ('pending', 'confirmed', 'in_house', 'cancelled', 'completed', 'no_show'));
+    END $$;
+  `)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_id_type VARCHAR(20)`)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_id_number VARCHAR(80)`)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS checked_out_at TIMESTAMPTZ`)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS booking_folio (
+      id SERIAL PRIMARY KEY,
+      booking_id INT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      kind VARCHAR(20) NOT NULL CHECK (kind IN ('charge', 'payment')),
+      category VARCHAR(20) NOT NULL DEFAULT 'other',
+      description TEXT NOT NULL,
+      amount DECIMAL(10, 2) NOT NULL,
+      method VARCHAR(20),
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_folio_booking ON booking_folio(booking_id)')
+}
+
+function roundMoney(n) {
+  return Math.round(Number(n || 0) * 100) / 100
+}
+
+async function getFolioSummary(bookingId) {
+  const r = await pool.query(
+    `SELECT id, kind, category, description, amount, method,
+            to_char(created_at, 'YYYY-MM-DD HH24:MI') AS created_at
+     FROM booking_folio WHERE booking_id = $1 ORDER BY id`,
+    [bookingId]
+  )
+  let charges = 0
+  let payments = 0
+  for (const row of r.rows) {
+    const amt = Number(row.amount)
+    if (row.kind === 'charge') charges += amt
+    else payments += amt
+  }
+  return {
+    folio: r.rows,
+    folio_charges: roundMoney(charges),
+    folio_payments: roundMoney(payments),
+    folio_balance: roundMoney(charges - payments),
+  }
+}
+
+async function ensureRoomCharge(booking, db = pool) {
+  const existing = await db.query(
+    `SELECT id FROM booking_folio WHERE booking_id = $1 AND kind = 'charge' AND category = 'room' LIMIT 1`,
+    [booking.id]
+  )
+  if (existing.rows[0]) {
+    await db.query(
+      `UPDATE booking_folio SET amount = $1, description = $2 WHERE id = $3`,
+      [booking.total_price, `Room stay (${toYmd(booking.check_in)} → ${toYmd(booking.check_out)})`, existing.rows[0].id]
+    )
+    return
+  }
+  await db.query(
+    `INSERT INTO booking_folio (booking_id, kind, category, description, amount)
+     VALUES ($1, 'charge', 'room', $2, $3)`,
+    [booking.id, `Room stay (${toYmd(booking.check_in)} → ${toYmd(booking.check_out)})`, booking.total_price]
+  )
+}
+
+async function loadStaffBooking(id) {
+  const r = await pool.query(
+    `SELECT b.*, u.username, u.email,
+            to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
+            to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
+            r.name AS room_name, r.price AS room_price, r.max_persons,
+            h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
+     FROM bookings b
+     JOIN users u ON b.user_id = u.id
+     JOIN rooms r ON b.room_id = r.id
+     JOIN hotels h ON r.hotel_id = h.id
+     LEFT JOIN crs_channels c ON c.id = b.channel_id
+     WHERE b.id = $1`,
+    [id]
+  )
+  if (!r.rows[0]) return null
+  const folio = await getFolioSummary(id)
+  return { ...r.rows[0], ...folio }
+}
+
+async function findOrCreateWalkIn(name, email) {
+  const display = String(name || '').trim()
+  if (!display) return { error: 'Walk-in name is required.' }
+  const cleanEmail = String(email || '').trim().toLowerCase()
+  if (cleanEmail) {
+    const exist = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [cleanEmail])
+    if (exist.rows[0]) return { userId: exist.rows[0].id }
+  }
+  const base = display.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'walkin'
+  let username = base
+  let n = 1
+  while (true) {
+    const taken = await pool.query('SELECT id FROM users WHERE username = $1 LIMIT 1', [username])
+    if (!taken.rows[0]) break
+    n += 1
+    username = `${base}${n}`.slice(0, 50)
+  }
+  const nextEmail = cleanEmail || `${username}@walkin.local`
+  const emailTaken = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [nextEmail])
+  if (emailTaken.rows[0]) return { userId: emailTaken.rows[0].id }
+  const hash = await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 10)
+  const created = await pool.query(
+    `INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, 'guest') RETURNING id`,
+    [username, nextEmail, hash]
+  )
+  return { userId: created.rows[0].id }
+}
+
+async function syncRoomHold(roomId) {
+  const holding = await pool.query(
+    `SELECT 1 FROM bookings WHERE room_id = $1 AND status = ANY($2::text[]) LIMIT 1`,
+    [roomId, HOLDING_STATUSES]
+  )
+  if (holding.rows[0]) {
+    await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status = 'available'", [roomId])
+    return
+  }
+  await releaseRoomIfReady(roomId)
+}
+
+async function applyBookingStatusEffects(booking, status) {
+  if (status === 'confirmed' || status === 'cancelled') {
+    const details = await pool.query(
+      `SELECT r.name AS room_name, h.name AS hotel_name
+       FROM rooms r
+       JOIN hotels h ON r.hotel_id = h.id
+       WHERE r.id = $1`,
+      [booking.room_id]
+    )
+    const roomName = details.rows[0]?.room_name || 'your room'
+    const hotelName = details.rows[0]?.hotel_name || ''
+    const message =
+      status === 'confirmed'
+        ? `Your booking for ${roomName}${hotelName ? ` at ${hotelName}` : ''} is confirmed and ready.`
+        : `Your booking for ${roomName} has been cancelled.`
+    await pool.query(
+      `INSERT INTO notifications (user_id, booking_id, type, message, is_read)
+       VALUES ($1, $2, $3, $4, 0)`,
+      [booking.user_id, booking.id, status, message]
+    )
+  }
+
+  if (status === 'confirmed' || status === 'in_house') {
+    await syncRoomHold(booking.room_id)
+  } else if (status === 'completed') {
+    await openCheckoutTask(booking.room_id, booking.id)
+    await pool.query("UPDATE rooms SET status = 'booked' WHERE id = $1 AND status <> 'maintenance'", [booking.room_id])
+    await awardStayPoints(booking)
+  } else if (status === 'cancelled' || status === 'no_show') {
+    await syncRoomHold(booking.room_id)
+  }
+}
+
 function ymd(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
@@ -2524,7 +2922,7 @@ async function nightlyRate(roomId, hotelId, date, fallbackPrice) {
   return Number(fallbackPrice || 0)
 }
 
-async function crsQuote(roomId, checkIn, checkOut) {
+async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
   const room = await pool.query(
     `SELECT r.id, r.price, r.status, r.hotel_id, r.name, r.max_persons, h.name AS hotel_name
      FROM rooms r JOIN hotels h ON h.id = r.hotel_id WHERE r.id = $1`,
@@ -2537,10 +2935,11 @@ async function crsQuote(roomId, checkIn, checkOut) {
   if (!nights.length) return { error: 'Check-out must be after check-in.' }
   const overlap = await pool.query(
     `SELECT id FROM bookings
-     WHERE room_id = $1 AND status IN ('pending', 'confirmed')
+     WHERE room_id = $1 AND status = ANY($4::text[])
        AND check_in < $3::date AND check_out > $2::date
+       AND ($5::int IS NULL OR id <> $5)
      LIMIT 1`,
-    [roomId, checkIn, checkOut]
+    [roomId, checkIn, checkOut, HOLDING_STATUSES, excludeBookingId]
   )
   if (overlap.rows[0]) return { error: 'Those dates are already reserved.' }
   const closed = await pool.query(
@@ -2573,9 +2972,10 @@ async function crsQuote(roomId, checkIn, checkOut) {
 app.get('/api/crs/quote', async (req, res) => {
   try {
     const roomId = parseInt(req.query.room_id, 10)
+    const excludeId = parseInt(req.query.exclude_id, 10) || null
     const { check_in, check_out } = req.query || {}
     if (!roomId || !check_in || !check_out) return res.status(400).json({ error: 'Room and dates are required.' })
-    const quote = await crsQuote(roomId, check_in, check_out)
+    const quote = await crsQuote(roomId, check_in, check_out, excludeId)
     if (quote.error) return res.status(400).json({ error: quote.error })
     res.json(quote)
   } catch (e) {
@@ -2793,9 +3193,9 @@ app.get('/api/crs/availability', async (req, res) => {
     const bookings = await pool.query(
       `SELECT room_id, to_char(check_in, 'YYYY-MM-DD') AS check_in, to_char(check_out, 'YYYY-MM-DD') AS check_out
        FROM bookings
-       WHERE status IN ('pending', 'confirmed')
+       WHERE status = ANY($3::text[])
          AND check_in < $2::date AND check_out > $1::date`,
-      [start, endExclusive]
+      [start, endExclusive, HOLDING_STATUSES]
     )
     const stops = await pool.query(
       `SELECT id, room_id, to_char(start_date, 'YYYY-MM-DD') AS start_date, to_char(end_date, 'YYYY-MM-DD') AS end_date
@@ -3000,7 +3400,7 @@ async function campaignAudience(audience) {
   if (audience === 'stayed') {
     return pool.query(
       `SELECT DISTINCT u.id, u.username, u.email FROM users u
-       JOIN bookings b ON b.user_id = u.id AND b.status IN ('confirmed', 'completed')
+       JOIN bookings b ON b.user_id = u.id AND b.status IN ('confirmed', 'in_house', 'completed')
        WHERE u.role = 'guest'
        ORDER BY u.username`
     )
@@ -3021,8 +3421,8 @@ app.get('/api/crm/loyalty', async (req, res) => {
     const guests = await pool.query(
       `SELECT u.id, u.username, u.email, to_char(u.created_at, 'YYYY-MM-DD') AS joined,
               p.loyalty_points, p.vip_status, p.notes,
-              COUNT(b.id) FILTER (WHERE b.status IN ('confirmed', 'completed'))::int AS stays,
-              COALESCE(SUM(b.total_price) FILTER (WHERE b.status IN ('confirmed', 'completed')), 0) AS spend
+              COUNT(b.id) FILTER (WHERE b.status IN ('confirmed', 'in_house', 'completed'))::int AS stays,
+              COALESCE(SUM(b.total_price) FILTER (WHERE b.status IN ('confirmed', 'in_house', 'completed')), 0) AS spend
        FROM users u
        JOIN guest_profiles p ON p.user_id = u.id
        LEFT JOIN bookings b ON b.user_id = u.id
@@ -3873,7 +4273,7 @@ async function loadAnalyticsBookings(from, to) {
 function summarizePeriod(bookings, roomCount, from, to) {
   const nights = daysInclusiveKeys(from, to)
   const availableNights = roomCount * nights
-  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'in_house' || b.status === 'completed')
   const cancelled = bookings.filter((b) => b.status === 'cancelled')
   const arrived = recognized.filter((b) => b.check_in >= from && b.check_in <= to)
   const departed = recognized.filter((b) => b.check_out >= from && b.check_out <= to)
@@ -3926,7 +4326,7 @@ function summarizePeriod(bookings, roomCount, from, to) {
 }
 
 function buildDaily(bookings, roomCount, from, to) {
-  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const recognized = bookings.filter((b) => b.status === 'confirmed' || b.status === 'in_house' || b.status === 'completed')
   const days = []
   let maxOcc = 1
   for (let d = from; d <= to; d = addDaysKey(d, 1)) {
@@ -3986,7 +4386,7 @@ async function buildAnalytics(from, to) {
     departures: { value: current.departures, previous: previous.departures, delta: deltaPct(current.departures, previous.departures) },
     guests: { value: current.guests, previous: previous.guests, delta: deltaPct(current.guests, previous.guests) },
   }
-  const recognized = currentRows.filter((b) => b.status === 'confirmed' || b.status === 'completed')
+  const recognized = currentRows.filter((b) => b.status === 'confirmed' || b.status === 'in_house' || b.status === 'completed')
   const alloc = {
     nights: (b) => overlapNights(b.check_in, b.check_out, from, to),
     revenue: (b) => {
@@ -4003,7 +4403,7 @@ async function buildAnalytics(from, to) {
          (SELECT COUNT(*)::int FROM rooms WHERE status = 'maintenance') AS maintenance,
          (SELECT COUNT(*)::int FROM housekeeping_tasks WHERE status IN ('dirty', 'in_progress')) AS dirty,
          (SELECT COUNT(*)::int FROM maintenance_requests WHERE status IN ('open', 'assigned', 'in_progress', 'on_hold')) AS work_orders,
-         (SELECT COUNT(*)::int FROM bookings WHERE status = 'confirmed' AND check_in <= CURRENT_DATE AND check_out > CURRENT_DATE) AS in_house,
+         (SELECT COUNT(*)::int FROM bookings WHERE status = 'in_house') AS in_house,
          (SELECT COUNT(*)::int FROM bookings WHERE status = 'pending') AS pending`
     ),
     pool.query(
@@ -4291,6 +4691,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 pool.query('SELECT 1').then(async () => {
   await ensureCrmTables()
   await ensureCrsTables()
+  await ensureBookingOps()
   await ensureGalleryColumns()
   await ensureFinanceTables()
   await ensureHrTables()

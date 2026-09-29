@@ -99,7 +99,8 @@
                   :class="{
                     'bg-amber-100 text-amber-800': b.status === 'pending',
                     'bg-green-100 text-green-800': b.status === 'confirmed' || b.status === 'completed',
-                    'bg-red-100 text-red-800': b.status === 'cancelled',
+                    'bg-sky-100 text-sky-800': b.status === 'in_house',
+                    'bg-red-100 text-red-800': b.status === 'cancelled' || b.status === 'no_show',
                   }"
                 >{{ b.status }}</span>
               </td>
@@ -188,7 +189,7 @@ const quickLinkRows = computed(() => {
 })
 
 const counts = computed(() => {
-  const c = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 }
+  const c = { pending: 0, confirmed: 0, in_house: 0, cancelled: 0, completed: 0, no_show: 0 }
   bookings.value.forEach((b) => {
     if (c[b.status] !== undefined) c[b.status]++
   })
@@ -196,11 +197,21 @@ const counts = computed(() => {
 })
 
 const statusBars = computed(() => {
-  const max = Math.max(counts.value.pending, counts.value.confirmed, counts.value.cancelled, counts.value.completed, 1)
+  const max = Math.max(
+    counts.value.pending,
+    counts.value.confirmed,
+    counts.value.in_house,
+    counts.value.cancelled,
+    counts.value.completed,
+    counts.value.no_show,
+    1
+  )
   return [
     { key: 'pending', label: 'Pending', bar: 'bg-amber-400' },
     { key: 'confirmed', label: 'Confirmed', bar: 'bg-green-500' },
+    { key: 'in_house', label: 'In-house', bar: 'bg-sky-500' },
     { key: 'cancelled', label: 'Cancelled', bar: 'bg-red-400' },
+    { key: 'no_show', label: 'No-show', bar: 'bg-stone-400' },
     { key: 'completed', label: 'Completed', bar: 'bg-emerald-600' },
   ].map((row) => {
     const count = counts.value[row.key]
@@ -210,7 +221,7 @@ const statusBars = computed(() => {
 
 const totalRevenue = computed(() => {
   return bookings.value
-    .filter((b) => b.status === 'confirmed' || b.status === 'completed')
+    .filter((b) => b.status === 'confirmed' || b.status === 'in_house' || b.status === 'completed')
     .reduce((sum, b) => sum + Number(b.total_price || 0), 0)
 })
 

@@ -65,11 +65,27 @@ CREATE TABLE IF NOT EXISTS bookings (
     check_out DATE NOT NULL,
     guests INT NOT NULL DEFAULT 1,
     total_price DECIMAL(10, 2) NOT NULL,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed')),
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'in_house', 'cancelled', 'completed', 'no_show')),
+    guest_id_type VARCHAR(20),
+    guest_id_number VARCHAR(80),
+    checked_in_at TIMESTAMPTZ,
+    checked_out_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_room ON bookings(room_id);
+
+CREATE TABLE IF NOT EXISTS booking_folio (
+    id SERIAL PRIMARY KEY,
+    booking_id INT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+    kind VARCHAR(20) NOT NULL CHECK (kind IN ('charge', 'payment')),
+    category VARCHAR(20) NOT NULL DEFAULT 'other',
+    description TEXT NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    method VARCHAR(20),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_folio_booking ON booking_folio(booking_id);
 
 -- Notifications (optional)
 CREATE TABLE IF NOT EXISTS notifications (

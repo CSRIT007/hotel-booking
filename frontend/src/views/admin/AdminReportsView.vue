@@ -115,7 +115,8 @@
                   :class="{
                     'bg-amber-100 text-amber-800': b.status === 'pending',
                     'bg-green-100 text-green-800': b.status === 'confirmed' || b.status === 'completed',
-                    'bg-red-100 text-red-800': b.status === 'cancelled',
+                    'bg-sky-100 text-sky-800': b.status === 'in_house',
+                    'bg-red-100 text-red-800': b.status === 'cancelled' || b.status === 'no_show',
                   }"
                 >{{ b.status }}</span>
               </td>
