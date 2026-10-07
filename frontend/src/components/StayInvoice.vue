@@ -48,6 +48,12 @@
       </p>
       <p v-if="methodSummary" class="mt-1 text-xs text-stone-500">{{ methodSummary }}</p>
     </div>
+    <div class="mt-6 border-t border-stone-200 pt-4 text-sm text-stone-600">
+      <p class="font-semibold text-stone-800">{{ invoice.hotel_name }}</p>
+      <p v-if="invoice.hotel_location">{{ invoice.hotel_location }}</p>
+      <p>{{ invoice.hotel_phone || '+855 98 944 686' }}</p>
+      <p>{{ invoice.hotel_email || 'noreply@smilerental.com' }}</p>
+    </div>
   </div>
 </template>
 

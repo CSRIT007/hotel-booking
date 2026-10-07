@@ -2984,6 +2984,8 @@ async function buildInvoice(bookingId) {
     invoiced_at: booking.invoiced_at,
     hotel_name: booking.hotel_name,
     hotel_location: booking.hotel_location,
+    hotel_phone: '+855 98 944 686',
+    hotel_email: 'noreply@smilerental.com',
     guest_name: booking.username,
     guest_email: booking.email,
     guest_id_type: booking.guest_id_type,

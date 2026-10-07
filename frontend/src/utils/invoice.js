@@ -51,6 +51,7 @@ export function printStayInvoice(inv) {
     th { font-size: 11px; text-transform: uppercase; color: #57534e; }
     .right { text-align: right; }
     .totals { margin-top: 16px; font-size: 14px; }
+    .hotel { margin-top: 28px; padding-top: 16px; border-top: 1px solid #e7e5e4; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -73,6 +74,12 @@ export function printStayInvoice(inv) {
     <p>Charges ${formatMoney(inv.folio_charges)} · Payments ${formatMoney(inv.folio_payments)}</p>
     <p><strong>Balance ${formatMoney(inv.folio_balance)}</strong></p>
     ${methodBits ? `<p class="muted">${methodBits}</p>` : ''}
+  </div>
+  <div class="hotel">
+    <p><strong>${inv.hotel_name || 'Hotel'}</strong></p>
+    ${inv.hotel_location ? `<p>${inv.hotel_location}</p>` : ''}
+    <p>${inv.hotel_phone || '+855 98 944 686'}</p>
+    <p>${inv.hotel_email || 'noreply@smilerental.com'}</p>
   </div>
 </body>
 </html>`)
