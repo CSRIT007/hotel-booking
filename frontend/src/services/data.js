@@ -437,6 +437,10 @@ export async function checkOutBooking(id, payload) {
   throw new Error('No API configured')
 }
 
+export async function getBookingInvoice(id) {
+  return requireLocal(() => localApi.getBookingInvoice(id), 'Failed to load invoice')
+}
+
 export async function updateContactStatus(id, status) {
   if (hasLocalApi) {
     return await localApi.updateContactStatus(id, status)

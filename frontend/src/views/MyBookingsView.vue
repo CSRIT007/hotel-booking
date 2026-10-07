@@ -43,7 +43,20 @@
               <li>Check-out: {{ b.check_out }}</li>
               <li>Guests: {{ b.guests }}</li>
               <li>Total: {{ formatMoney(b.total_price) }}</li>
+              <li v-if="b.invoice_no">Invoice: {{ b.invoice_no }}</li>
             </ul>
+            <button
+              v-if="['confirmed', 'in_house', 'completed'].includes(b.status)"
+              type="button"
+              class="mt-3 text-sm font-medium text-brand-700 hover:underline"
+              @click="showInvoice(b)"
+            >
+              {{ invoice?.invoice_no && invoiceBookingId === b.id ? 'Hide invoice' : 'View invoice' }}
+            </button>
+            <div v-if="invoice && invoiceBookingId === b.id" class="mt-4">
+              <p v-if="invoiceError" class="text-sm text-red-600">{{ invoiceError }}</p>
+              <StayInvoice v-else :invoice="invoice" />
+            </div>
             <p v-if="b.status === 'pending'" class="mt-3 text-sm text-amber-700">
               Waiting for the hotel to confirm. We will update this page when it is ready.
             </p>
@@ -75,14 +88,18 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAuth } from '../composables/useAuth'
-import { getMyBookings, getNotifications, markNotificationsRead } from '../services/data'
+import { getBookingInvoice, getMyBookings, getNotifications, markNotificationsRead } from '../services/data'
 import { formatMoney } from '../utils/money'
 import PageHero from '../components/PageHero.vue'
+import StayInvoice from '../components/StayInvoice.vue'
 
 const { currentUser } = useAuth()
 const bookings = ref([])
 const notices = ref([])
 const loading = ref(true)
+const invoice = ref(null)
+const invoiceBookingId = ref(null)
+const invoiceError = ref('')
 let pollTimer = null
 
 const latestNotice = computed(() => notices.value.find((n) => Number(n.is_read) === 0) || notices.value[0] || null)
@@ -95,6 +112,23 @@ function statusLabel(status) {
   if (status === 'no_show') return 'No-show'
   if (status === 'completed') return 'Completed'
   return status
+}
+
+async function showInvoice(b) {
+  if (invoiceBookingId.value === b.id && invoice.value) {
+    invoice.value = null
+    invoiceBookingId.value = null
+    invoiceError.value = ''
+    return
+  }
+  invoiceError.value = ''
+  invoiceBookingId.value = b.id
+  invoice.value = null
+  try {
+    invoice.value = await getBookingInvoice(b.id)
+  } catch (e) {
+    invoiceError.value = e.message || 'Failed to load invoice'
+  }
 }
 
 function statusClass(status) {

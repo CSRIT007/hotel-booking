@@ -70,10 +70,16 @@ CREATE TABLE IF NOT EXISTS bookings (
     guest_id_number VARCHAR(80),
     checked_in_at TIMESTAMPTZ,
     checked_out_at TIMESTAMPTZ,
+    invoice_no VARCHAR(40) UNIQUE,
+    invoiced_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_room ON bookings(room_id);
+
+-- Overlap lock (pending / confirmed / in-house) is added by the API on startup:
+-- EXCLUDE USING gist (room_id WITH =, daterange(check_in, check_out, '[)') WITH &&)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TABLE IF NOT EXISTS booking_folio (
     id SERIAL PRIMARY KEY,

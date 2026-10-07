@@ -1,7 +1,7 @@
 <template>
   <div>
     <p class="text-sm text-stone-600">
-      Create a stay, check the guest in with ID and a room, post charges to the folio, then collect the balance at check-out.
+      Create a stay, take cash / bank / card (including a deposit), post charges, collect the balance at check-out, then issue the invoice.
     </p>
 
     <form class="mt-5 rounded-xl border border-stone-200 bg-white p-5 shadow-sm" @submit.prevent="save">
@@ -11,6 +11,7 @@
         </h2>
         <p v-if="quote" class="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-800">
           {{ quote.nights }} night{{ quote.nights === 1 ? '' : 's' }} · {{ formatMoney(quote.total) }}
+          <span v-if="quote.min_nights > 1"> · min {{ quote.min_nights }}</span>
         </p>
       </div>
 
@@ -58,7 +59,7 @@
           <select v-model.number="form.room_id" required class="field">
             <option disabled value="0">Select room</option>
             <option v-for="r in bookableRooms" :key="r.id" :value="r.id">
-              {{ r.name }} — {{ r.hotel_name }} ({{ formatMoney(r.price) }}/night)
+              {{ r.name }} — {{ r.hotel_name }} ({{ formatMoney(r.from_price ?? r.price) }}/night)
             </option>
           </select>
         </div>
@@ -112,8 +113,17 @@
           <p v-if="stay.guest_id_number" class="mt-1 text-xs text-stone-500">
             ID: {{ idTypeLabel(stay.guest_id_type) }} {{ stay.guest_id_number }}
           </p>
+          <p v-if="stay.invoice_no" class="mt-1 text-xs text-stone-500">Invoice {{ stay.invoice_no }}</p>
         </div>
-        <button type="button" class="action-btn" @click="stay = null">Close</button>
+        <div class="flex gap-2">
+          <button
+            v-if="['confirmed', 'in_house', 'completed'].includes(stay.status)"
+            type="button"
+            class="action-btn"
+            @click="openInvoice"
+          >Invoice</button>
+          <button type="button" class="action-btn" @click="closeStay">Close</button>
+        </div>
       </div>
 
       <form v-if="stay.status === 'confirmed'" class="mt-4 border-t border-stone-100 pt-4" @submit.prevent="submitCheckIn">
@@ -162,11 +172,11 @@
         </button>
       </form>
 
-      <div v-else class="mt-4 border-t border-stone-100 pt-4">
+      <div v-if="['confirmed', 'in_house', 'completed'].includes(stay.status)" class="mt-4 border-t border-stone-100 pt-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500">Folio</h3>
           <p class="text-sm font-semibold" :class="Number(stay.folio_balance) > 0.009 ? 'text-amber-700' : 'text-green-700'">
-            Balance {{ formatMoney(stay.folio_balance) }}
+            {{ Number(stay.folio_balance) < -0.009 ? 'Credit' : 'Balance' }} {{ formatMoney(stay.folio_balance) }}
           </p>
         </div>
         <div class="mt-3 overflow-x-auto">
@@ -185,7 +195,7 @@
                 <td class="whitespace-nowrap px-3 py-2 text-xs text-stone-500">{{ item.created_at }}</td>
                 <td class="px-3 py-2 text-stone-800">
                   {{ item.description }}
-                  <span v-if="item.method" class="text-xs text-stone-500"> · {{ item.method }}</span>
+                  <span v-if="item.method" class="text-xs text-stone-500"> · {{ payMethodLabel(item.method) }}</span>
                 </td>
                 <td class="px-3 py-2 capitalize text-stone-600">{{ folioCategoryLabel(item.category) }}</td>
                 <td
@@ -196,7 +206,7 @@
                 </td>
                 <td class="px-3 py-2 text-right">
                   <button
-                    v-if="stay.status === 'in_house' && item.category !== 'room'"
+                    v-if="['confirmed', 'in_house'].includes(stay.status) && item.category !== 'room'"
                     type="button"
                     class="action-btn text-red-700 ring-red-200 hover:bg-red-50"
                     @click="removeFolioLine(item)"
@@ -208,7 +218,30 @@
         </div>
         <p class="mt-2 text-xs text-stone-500">
           Charges {{ formatMoney(stay.folio_charges) }} · Payments {{ formatMoney(stay.folio_payments) }}
+          <span v-if="methodSummary"> · {{ methodSummary }}</span>
         </p>
+
+        <form v-if="stay.status === 'confirmed'" class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" @submit.prevent="submitPayment">
+          <div class="xl:col-span-2">
+            <label class="block text-xs font-medium text-stone-700">Advance deposit</label>
+            <input v-model="payForm.description" type="text" required class="field" placeholder="Advance deposit" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-stone-700">Method</label>
+            <select v-model="payForm.method" class="field">
+              <option value="cash">Cash</option>
+              <option value="bank">Bank</option>
+              <option value="card">Card</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-stone-700">Amount</label>
+            <div class="flex gap-2">
+              <input v-model.number="payForm.amount" type="number" min="0.01" step="0.01" required class="field" />
+              <button type="submit" class="mt-1 rounded-md bg-stone-800 px-3 text-xs font-medium text-white hover:bg-stone-900" :disabled="staySaving">Take</button>
+            </div>
+          </div>
+        </form>
 
         <form v-if="stay.status === 'in_house'" class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" @submit.prevent="submitCharge">
           <div class="xl:col-span-2">
@@ -278,6 +311,9 @@
         </form>
         <p v-if="stayError" class="mt-3 text-sm text-red-600">{{ stayError }}</p>
         <p v-if="staySuccess" class="mt-3 text-sm text-green-600">{{ staySuccess }}</p>
+        <div v-if="invoice" class="mt-5">
+          <StayInvoice :invoice="invoice" />
+        </div>
       </div>
     </section>
 
@@ -351,6 +387,12 @@
                     @click="openStay(b)"
                   >Folio</button>
                   <button
+                    v-if="b.status === 'completed' || b.invoice_no"
+                    type="button"
+                    class="action-btn"
+                    @click="openStayInvoice(b)"
+                  >Invoice</button>
+                  <button
                     v-if="b.status === 'pending' || b.status === 'confirmed' || b.status === 'in_house'"
                     type="button"
                     class="action-btn"
@@ -394,6 +436,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConfirmModal from '../../components/ConfirmModal.vue'
+import StayInvoice from '../../components/StayInvoice.vue'
 import {
   addFolioItem,
   checkInBooking,
@@ -401,12 +444,14 @@ import {
   createBooking,
   deleteFolioItem,
   getBooking,
+  getBookingInvoice,
   getBookings,
   getCrsQuote,
   getRooms,
   getUsers,
   updateBooking,
 } from '../../services/data'
+import { folioCategoryLabel, payMethodLabel } from '../../utils/invoice'
 import { formatMoney } from '../../utils/money'
 
 const emptyForm = () => ({
@@ -441,6 +486,7 @@ const stayPanel = ref(null)
 const staySaving = ref(false)
 const stayError = ref('')
 const staySuccess = ref('')
+const invoice = ref(null)
 const checkInForm = reactive({
   guest_id_type: 'national_id',
   guest_id_number: '',
@@ -452,6 +498,13 @@ const chargeForm = reactive({ description: '', category: 'other', amount: null }
 const payForm = reactive({ description: 'Payment', method: 'cash', amount: null })
 const checkoutForm = reactive({ payment_amount: 0, payment_method: 'cash' })
 
+const methodSummary = computed(() => {
+  const methods = stay.value?.payments_by_method || {}
+  return ['cash', 'bank', 'card']
+    .filter((k) => Number(methods[k]) > 0)
+    .map((k) => `${payMethodLabel(k)} ${formatMoney(methods[k])}`)
+    .join(' · ')
+})
 const guests = computed(() => users.value.filter((u) => (u.role || '').toLowerCase() === 'guest'))
 const bookableRooms = computed(() => rooms.value.filter((r) => r.status !== 'maintenance'))
 const selectedRoom = computed(() => bookableRooms.value.find((r) => r.id === form.room_id))
@@ -527,14 +580,6 @@ function idTypeLabel(type) {
   return 'National ID'
 }
 
-function folioCategoryLabel(category) {
-  if (category === 'fnb') return 'F&B'
-  if (category === 'minibar') return 'Mini-bar'
-  if (category === 'room') return 'Room'
-  if (category === 'deposit') return 'Deposit'
-  return category || 'Other'
-}
-
 function resetForm() {
   editingId.value = null
   editingGuest.value = ''
@@ -568,16 +613,22 @@ function applyStay(data) {
   chargeForm.description = ''
   chargeForm.category = 'other'
   chargeForm.amount = null
-  payForm.description = 'Payment'
+  payForm.description = data.status === 'confirmed' ? 'Advance deposit' : 'Payment'
   payForm.method = 'cash'
   payForm.amount = null
-  checkoutForm.payment_amount = Number(data.folio_balance || 0)
+  checkoutForm.payment_amount = Math.max(0, Number(data.folio_balance || 0))
   checkoutForm.payment_method = 'cash'
+}
+
+function closeStay() {
+  stay.value = null
+  invoice.value = null
 }
 
 async function openStay(b) {
   stayError.value = ''
   staySuccess.value = ''
+  invoice.value = null
   try {
     applyStay(await getBooking(b.id))
     await nextTick()
@@ -585,6 +636,22 @@ async function openStay(b) {
   } catch (e) {
     alert(e.message || 'Failed to open stay')
   }
+}
+
+async function openInvoice() {
+  stayError.value = ''
+  try {
+    invoice.value = await getBookingInvoice(stay.value.id)
+    stay.value = { ...stay.value, invoice_no: invoice.value.invoice_no, invoiced_at: invoice.value.invoiced_at }
+    await nextTick()
+  } catch (e) {
+    stayError.value = e.message || 'Failed to load invoice'
+  }
+}
+
+async function openStayInvoice(b) {
+  await openStay(b)
+  if (stay.value) await openInvoice()
 }
 
 async function submitCheckIn() {
@@ -675,7 +742,10 @@ async function submitCheckOut() {
         payment_method: checkoutForm.payment_method,
       })
     )
-    staySuccess.value = 'Guest checked out. Housekeeping will be notified.'
+    staySuccess.value = stay.value.invoice_no
+      ? `Guest checked out. Invoice ${stay.value.invoice_no} is ready.`
+      : 'Guest checked out. Housekeeping will be notified.'
+    if (stay.value) await openInvoice()
     await load()
   } catch (e) {
     stayError.value = e.message || 'Check-out failed'

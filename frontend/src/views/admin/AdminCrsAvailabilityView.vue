@@ -2,7 +2,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Availability</h1>
     <p class="mt-1 text-stone-600">
-      Green is open for sale. Red is already reserved. Amber is closed (stop sell). Click a green cell to close that night, or an amber cell to open it again.
+      Green is open (hover for the nightly rate). Red is pending, confirmed, or in-house. Amber is stop-sell. Click a green cell to close that night, or an amber cell to open it again.
     </p>
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -36,6 +36,14 @@
           <option v-for="h in hotels" :key="h.id" :value="String(h.id)">{{ h.name }}</option>
         </select>
       </div>
+      <div>
+        <label class="block text-xs font-medium text-stone-700">Days</label>
+        <select v-model.number="days" class="field w-auto" @change="load">
+          <option :value="7">7</option>
+          <option :value="14">14</option>
+          <option :value="31">31</option>
+        </select>
+      </div>
     </div>
     <p v-if="error" class="mt-3 text-sm text-red-600">{{ error }}</p>
 
@@ -60,7 +68,7 @@
                 type="button"
                 class="block h-8 w-8 rounded mx-auto"
                 :class="cellClass(room.cells[d]?.status)"
-                :title="`${d} · ${room.cells[d]?.status}`"
+                :title="cellTitle(d, room.cells[d])"
                 :disabled="busy || room.cells[d]?.status === 'booked' || room.cells[d]?.status === 'maintenance'"
                 @click="toggle(room, d, room.cells[d])"
               />
@@ -76,12 +84,14 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { closeCrsDates, getCrsAvailability, getHotels, openCrsDates } from '../../services/data'
+import { formatMoney } from '../../utils/money'
 import { todayKey } from '../../services/hr'
 
 const hotels = ref([])
 const board = ref({ dates: [], rooms: [], counts: {} })
 const fromDate = ref(todayKey())
 const hotelId = ref('')
+const days = ref(14)
 const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
@@ -96,12 +106,28 @@ function cellClass(status) {
   return map[status] || 'bg-stone-200'
 }
 
+function cellTitle(date, cell) {
+  if (!cell) return date
+  if (cell.status === 'available' && cell.rate != null) {
+    const plan = cell.plan ? ` · ${cell.plan}` : ''
+    const min = cell.min_nights > 1 ? ` · min ${cell.min_nights}` : ''
+    return `${date} · open · ${formatMoney(cell.rate)}${plan}${min}`
+  }
+  if (cell.status === 'booked') {
+    const st = cell.booking_status ? ` (${String(cell.booking_status).replace('_', ' ')})` : ''
+    return `${date} · reserved${st}`
+  }
+  if (cell.status === 'blocked') return `${date} · stop sell`
+  if (cell.status === 'maintenance') return `${date} · maintenance`
+  return `${date} · ${cell.status}`
+}
+
 async function load() {
   loading.value = true
   error.value = ''
   try {
     hotels.value = await getHotels()
-    board.value = await getCrsAvailability({ from: fromDate.value, days: 14, hotel_id: hotelId.value || undefined })
+    board.value = await getCrsAvailability({ from: fromDate.value, days: days.value, hotel_id: hotelId.value || undefined })
   } catch (e) {
     error.value = e.message
   }

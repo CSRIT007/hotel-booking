@@ -400,6 +400,9 @@ app.get('/api/rooms', async (req, res) => {
   try {
     const hotelId = req.query.hotel_id || req.query.hotel
     const statusFilter = req.query.status
+    const checkIn = req.query.check_in
+    const checkOut = req.query.check_out
+    const hasStay = checkIn && checkOut && String(checkOut) > String(checkIn)
     const conditions = []
     const params = []
     let idx = 1
@@ -416,7 +419,14 @@ app.get('/api/rooms', async (req, res) => {
     const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : ''
     const query = 'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id' + where + ' ORDER BY r.id'
     const r = await pool.query(query, params)
-    res.json(r.rows.map(withMedia))
+    let rows = await Promise.all(
+      r.rows.map((row) => attachSellInfo(withMedia(row), hasStay ? checkIn : null, hasStay ? checkOut : null))
+    )
+    const includeUnavailable = req.query.include_unavailable === '1' || req.query.include_unavailable === 'true'
+    if (hasStay && !includeUnavailable) {
+      rows = rows.filter((row) => row.available)
+    }
+    res.json(rows)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -430,7 +440,10 @@ app.get('/api/rooms/:id', async (req, res) => {
     )
     const row = r.rows[0]
     if (!row) return res.status(404).json({ error: 'Room not found' })
-    res.json(withMedia(row))
+    const checkIn = req.query.check_in
+    const checkOut = req.query.check_out
+    const hasStay = checkIn && checkOut && String(checkOut) > String(checkIn)
+    res.json(await attachSellInfo(withMedia(row), hasStay ? checkIn : null, hasStay ? checkOut : null))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -632,7 +645,7 @@ app.get('/api/bookings', async (req, res) => {
         `SELECT b.id, b.user_id, b.room_id,
                 to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
                 to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
-                b.guests, b.total_price, b.status, b.created_at,
+                b.guests, b.total_price, b.status, b.invoice_no, b.created_at,
                 r.name AS room_name, r.image AS room_image,
                 h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
          FROM bookings b
@@ -705,23 +718,33 @@ app.patch('/api/bookings/:id', async (req, res) => {
       return res.status(400).json({ error: 'Only pending, confirmed, or in-house stays can change dates.' })
     }
 
-    let total = current.total_price
+    let booking
     if (datesChanged) {
-      const quote = await crsQuote(nextRoomId, nextIn, nextOut, current.id)
-      if (quote.error) return res.status(400).json({ error: quote.error })
-      if (nextGuests && quote.max_persons && Number(nextGuests) > Number(quote.max_persons)) {
-        return res.status(400).json({ error: 'Guests exceed room capacity.' })
-      }
-      total = quote.total
+      const locked = await withRoomLock(nextRoomId, async (db) => {
+        const quote = await crsQuote(nextRoomId, nextIn, nextOut, current.id, db)
+        if (quote.error) return { rollback: true, error: quote.error }
+        if (nextGuests && quote.max_persons && Number(nextGuests) > Number(quote.max_persons)) {
+          return { rollback: true, error: 'Guests exceed room capacity.' }
+        }
+        const r = await db.query(
+          `UPDATE bookings
+           SET status = $1, room_id = $2, check_in = $3, check_out = $4, guests = $5, total_price = $6
+           WHERE id = $7 RETURNING *`,
+          [nextStatus, nextRoomId, nextIn, nextOut, nextGuests || 1, quote.total, current.id]
+        )
+        return { booking: r.rows[0] }
+      })
+      if (locked.error) return res.status(locked.status || 400).json({ error: locked.error })
+      booking = locked.booking
+    } else {
+      const r = await pool.query(
+        `UPDATE bookings
+         SET status = $1, room_id = $2, check_in = $3, check_out = $4, guests = $5, total_price = $6
+         WHERE id = $7 RETURNING *`,
+        [nextStatus, nextRoomId, nextIn, nextOut, nextGuests || 1, current.total_price, current.id]
+      )
+      booking = r.rows[0]
     }
-
-    const r = await pool.query(
-      `UPDATE bookings
-       SET status = $1, room_id = $2, check_in = $3, check_out = $4, guests = $5, total_price = $6
-       WHERE id = $7 RETURNING *`,
-      [nextStatus, nextRoomId, nextIn, nextOut, nextGuests || 1, total, current.id]
-    )
-    const booking = r.rows[0]
 
     if (nextStatus !== current.status) {
       await applyBookingStatusEffects(booking, nextStatus)
@@ -771,12 +794,6 @@ app.post('/api/bookings', async (req, res) => {
       }
     }
 
-    const quote = await crsQuote(room_id, check_in, check_out)
-    if (quote.error) return res.status(400).json({ error: quote.error })
-    if (guests && quote.max_persons && Number(guests) > Number(quote.max_persons)) {
-      return res.status(400).json({ error: 'Guests exceed room capacity.' })
-    }
-
     let nextStatus = 'pending'
     if (isStaff && ['pending', 'confirmed'].includes(status)) nextStatus = status
 
@@ -790,12 +807,21 @@ app.post('/api/bookings', async (req, res) => {
       channelId = ch.rows[0]?.id || null
     }
 
-    const r = await pool.query(
-      `INSERT INTO bookings (user_id, room_id, check_in, check_out, guests, total_price, status, channel_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [userId, room_id, check_in, check_out, guests || 1, quote.total, nextStatus, channelId]
-    )
-    const created = r.rows[0]
+    const locked = await withRoomLock(room_id, async (db) => {
+      const quote = await crsQuote(room_id, check_in, check_out, null, db)
+      if (quote.error) return { rollback: true, error: quote.error }
+      if (guests && quote.max_persons && Number(guests) > Number(quote.max_persons)) {
+        return { rollback: true, error: 'Guests exceed room capacity.' }
+      }
+      const r = await db.query(
+        `INSERT INTO bookings (user_id, room_id, check_in, check_out, guests, total_price, status, channel_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [userId, room_id, check_in, check_out, guests || 1, quote.total, nextStatus, channelId]
+      )
+      return { created: r.rows[0] }
+    })
+    if (locked.error) return res.status(locked.status || 400).json({ error: locked.error })
+    const created = locked.created
     if (nextStatus === 'confirmed') {
       await applyBookingStatusEffects(created, 'confirmed')
     }
@@ -836,21 +862,41 @@ app.post('/api/bookings/:id/check-in', async (req, res) => {
     if (idNumber.length < 3) return res.status(400).json({ error: 'Guest ID number is required.' })
     const idType = ID_TYPES.includes(body.guest_id_type) ? body.guest_id_type : 'national_id'
     const nextRoomId = body.room_id != null ? parseInt(body.room_id, 10) : current.room_id
-    if (Number(nextRoomId) !== Number(current.room_id)) {
-      const quote = await crsQuote(nextRoomId, toYmd(current.check_in), toYmd(current.check_out), current.id)
-      if (quote.error) return res.status(400).json({ error: quote.error })
-    }
     const deposit = roundMoney(body.deposit_amount)
     const method = PAY_METHODS.includes(body.deposit_method) ? body.deposit_method : 'cash'
     if (deposit < 0) return res.status(400).json({ error: 'Deposit cannot be negative.' })
+    const priorFolio = await getFolioSummary(current.id)
+    const depositCap = roundMoney(Number(current.total_price) - priorFolio.folio_payments)
+    if (deposit > depositCap + 0.009) {
+      return res.status(400).json({
+        error: `Deposit cannot exceed the remaining stay amount (${depositCap.toFixed(2)}).`,
+      })
+    }
 
-    const r = await pool.query(
-      `UPDATE bookings
-       SET status = 'in_house', room_id = $1, guest_id_type = $2, guest_id_number = $3, checked_in_at = NOW()
-       WHERE id = $4 RETURNING *`,
-      [nextRoomId, idType, idNumber, current.id]
-    )
-    const booking = r.rows[0]
+    let booking
+    if (Number(nextRoomId) !== Number(current.room_id)) {
+      const locked = await withRoomLock(nextRoomId, async (db) => {
+        const quote = await crsQuote(nextRoomId, toYmd(current.check_in), toYmd(current.check_out), current.id, db)
+        if (quote.error) return { rollback: true, error: quote.error }
+        const r = await db.query(
+          `UPDATE bookings
+           SET status = 'in_house', room_id = $1, guest_id_type = $2, guest_id_number = $3, checked_in_at = NOW()
+           WHERE id = $4 RETURNING *`,
+          [nextRoomId, idType, idNumber, current.id]
+        )
+        return { booking: r.rows[0] }
+      })
+      if (locked.error) return res.status(locked.status || 400).json({ error: locked.error })
+      booking = locked.booking
+    } else {
+      const r = await pool.query(
+        `UPDATE bookings
+         SET status = 'in_house', room_id = $1, guest_id_type = $2, guest_id_number = $3, checked_in_at = NOW()
+         WHERE id = $4 RETURNING *`,
+        [nextRoomId, idType, idNumber, current.id]
+      )
+      booking = r.rows[0]
+    }
     await ensureRoomCharge(booking)
     if (deposit > 0) {
       await pool.query(
@@ -879,23 +925,42 @@ app.post('/api/bookings/:id/folio', async (req, res) => {
     const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
     const current = currentQ.rows[0]
     if (!current) return res.status(404).json({ error: 'Booking not found' })
-    if (current.status !== 'in_house') {
-      return res.status(400).json({ error: 'Folio charges can be added while the guest is in-house.' })
-    }
     const body = req.body || {}
     const kind = body.kind === 'payment' ? 'payment' : 'charge'
+    if (kind === 'charge' && current.status !== 'in_house') {
+      return res.status(400).json({ error: 'Folio charges can be added while the guest is in-house.' })
+    }
+    if (kind === 'payment' && !['confirmed', 'in_house'].includes(current.status)) {
+      return res.status(400).json({ error: 'Payments can be taken on a confirmed or in-house stay.' })
+    }
     const amount = roundMoney(body.amount)
     if (!(amount > 0)) return res.status(400).json({ error: 'Amount must be greater than 0.' })
     const description = String(body.description || '').trim()
     if (!description) return res.status(400).json({ error: 'Description is required.' })
     let category = String(body.category || 'other')
     let method = null
+    const folio = await getFolioSummary(current.id)
     if (kind === 'charge') {
       if (category === 'room') return res.status(400).json({ error: 'Room stay is added at check-in.' })
       if (!FOLIO_CHARGE_CATEGORIES.includes(category)) category = 'other'
     } else {
-      category = 'payment'
       method = PAY_METHODS.includes(body.method) ? body.method : 'cash'
+      if (current.status === 'confirmed') {
+        category = 'deposit'
+        const cap = roundMoney(Number(current.total_price) - folio.folio_payments)
+        if (amount > cap + 0.009) {
+          return res.status(400).json({
+            error: `Advance cannot exceed the remaining stay amount (${cap.toFixed(2)}).`,
+          })
+        }
+      } else {
+        category = 'payment'
+        if (amount > folio.folio_balance + 0.009) {
+          return res.status(400).json({
+            error: `Balance is ${folio.folio_balance.toFixed(2)}. Take that amount or less.`,
+          })
+        }
+      }
     }
     await pool.query(
       `INSERT INTO booking_folio (booking_id, kind, category, description, amount, method)
@@ -906,7 +971,7 @@ app.post('/api/bookings/:id/folio', async (req, res) => {
       action: 'folio',
       entity: 'booking',
       entityId: current.id,
-      summary: `${kind} ${amount} on booking #${current.id}`,
+      summary: `${kind} ${amount} ${method ? payMethodLabel(method) : ''} on booking #${current.id}`.trim(),
     })
     res.status(201).json(await loadStaffBooking(current.id))
   } catch (e) {
@@ -926,8 +991,8 @@ app.delete('/api/bookings/:id/folio/:itemId', async (req, res) => {
       return res.status(400).json({ error: 'The room stay line cannot be removed.' })
     }
     const stay = await pool.query('SELECT status FROM bookings WHERE id = $1', [req.params.id])
-    if (stay.rows[0]?.status !== 'in_house') {
-      return res.status(400).json({ error: 'Folio can only be edited while the guest is in-house.' })
+    if (!['confirmed', 'in_house'].includes(stay.rows[0]?.status)) {
+      return res.status(400).json({ error: 'Folio can only be edited on a confirmed or in-house stay.' })
     }
     await pool.query('DELETE FROM booking_folio WHERE id = $1', [req.params.itemId])
     res.json(await loadStaffBooking(req.params.id))
@@ -955,12 +1020,14 @@ app.post('/api/bookings/:id/check-out', async (req, res) => {
           error: `Remaining balance is ${folio.folio_balance.toFixed(2)}. Collect payment before check-out.`,
         })
       }
+      const collected = roundMoney(Math.min(pay || folio.folio_balance, folio.folio_balance))
       await pool.query(
         `INSERT INTO booking_folio (booking_id, kind, category, description, amount, method)
-         VALUES ($1, 'payment', 'payment', 'Check-out settlement', $2, $3)`,
-        [current.id, pay || folio.folio_balance, method]
+         VALUES ($1, 'payment', 'payment', $2, $3, $4)`,
+        [current.id, `Check-out settlement (${payMethodLabel(method)})`, collected, method]
       )
     }
+    await ensureInvoiceNo(current.id)
     const r = await pool.query(
       `UPDATE bookings SET status = 'completed', checked_out_at = NOW() WHERE id = $1 RETURNING *`,
       [current.id]
@@ -973,6 +1040,24 @@ app.post('/api/bookings/:id/check-out', async (req, res) => {
       summary: `Checked out booking #${current.id}`,
     })
     res.json(await loadStaffBooking(current.id))
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/bookings/:id/invoice', async (req, res) => {
+  try {
+    const currentQ = await pool.query('SELECT id, user_id, status FROM bookings WHERE id = $1', [req.params.id])
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Booking not found' })
+    const isStaff = String(req.get('x-user-role') || '') === 'staff'
+    const actor = parseInt(req.get('x-user-id') || 0, 10)
+    if (!isStaff && actor !== Number(current.user_id)) {
+      return res.status(403).json({ error: 'You can only view your own invoice.' })
+    }
+    const invoice = await buildInvoice(current.id)
+    if (invoice.error) return res.status(400).json({ error: invoice.error })
+    res.json(invoice)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -2711,6 +2796,78 @@ async function ensureCrsTables() {
 const BOOKING_STATUSES = ['pending', 'confirmed', 'in_house', 'cancelled', 'completed', 'no_show']
 const HOLDING_STATUSES = ['pending', 'confirmed', 'in_house']
 const PAY_METHODS = ['cash', 'bank', 'card']
+
+function isInventoryConflict(err) {
+  return err && (err.code === '23P01' || err.code === '23505')
+}
+
+async function withRoomLock(roomId, fn) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const lock = await client.query('SELECT id FROM rooms WHERE id = $1 FOR UPDATE', [roomId])
+    if (!lock.rows[0]) {
+      await client.query('ROLLBACK')
+      return { error: 'Room not found.', status: 400 }
+    }
+    const result = await fn(client)
+    if (result && result.rollback) {
+      await client.query('ROLLBACK')
+      return { error: result.error, status: result.status || 400 }
+    }
+    await client.query('COMMIT')
+    return result || {}
+  } catch (e) {
+    try {
+      await client.query('ROLLBACK')
+    } catch {
+      /* ignore */
+    }
+    if (isInventoryConflict(e)) {
+      return { error: 'Those dates are already reserved.', status: 400 }
+    }
+    throw e
+  } finally {
+    client.release()
+  }
+}
+
+async function ensureInventoryLock() {
+  try {
+    await pool.query('CREATE EXTENSION IF NOT EXISTS btree_gist')
+  } catch (e) {
+    console.warn('btree_gist not available; bookings still lock per room at write time:', e.message)
+    return
+  }
+  const overlaps = await pool.query(
+    `SELECT a.id
+     FROM bookings a
+     JOIN bookings b ON a.room_id = b.room_id AND a.id < b.id
+     WHERE a.status = ANY($1::text[]) AND b.status = ANY($1::text[])
+       AND a.check_in < b.check_out AND a.check_out > b.check_in
+     LIMIT 1`,
+    [HOLDING_STATUSES]
+  )
+  if (overlaps.rows[0]) {
+    console.warn('Overlapping holds exist; skip exclusion constraint until they are cleared.')
+    return
+  }
+  try {
+    await pool.query('ALTER TABLE bookings DROP CONSTRAINT IF EXISTS bookings_room_dates_excl')
+    await pool.query(`
+      ALTER TABLE bookings
+      ADD CONSTRAINT bookings_room_dates_excl
+      EXCLUDE USING gist (
+        room_id WITH =,
+        daterange(check_in, check_out, '[)') WITH &&
+      )
+      WHERE (status IN ('pending', 'confirmed', 'in_house'))
+    `)
+  } catch (e) {
+    console.warn('Could not add booking overlap constraint:', e.message)
+  }
+}
+
 const ID_TYPES = ['national_id', 'passport', 'other']
 const FOLIO_CHARGE_CATEGORIES = ['room', 'minibar', 'laundry', 'fnb', 'other']
 
@@ -2741,6 +2898,9 @@ async function ensureBookingOps() {
   await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_id_number VARCHAR(80)`)
   await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ`)
   await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS checked_out_at TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS invoice_no VARCHAR(40)`)
+  await pool.query(`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMPTZ`)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_invoice_no ON bookings(invoice_no) WHERE invoice_no IS NOT NULL`)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS booking_folio (
       id SERIAL PRIMARY KEY,
@@ -2760,6 +2920,13 @@ function roundMoney(n) {
   return Math.round(Number(n || 0) * 100) / 100
 }
 
+function payMethodLabel(method) {
+  if (method === 'bank') return 'Bank'
+  if (method === 'card') return 'Card'
+  if (method === 'cash') return 'Cash'
+  return method || ''
+}
+
 async function getFolioSummary(bookingId) {
   const r = await pool.query(
     `SELECT id, kind, category, description, amount, method,
@@ -2769,16 +2936,69 @@ async function getFolioSummary(bookingId) {
   )
   let charges = 0
   let payments = 0
+  const payments_by_method = { cash: 0, bank: 0, card: 0 }
   for (const row of r.rows) {
     const amt = Number(row.amount)
     if (row.kind === 'charge') charges += amt
-    else payments += amt
+    else {
+      payments += amt
+      if (payments_by_method[row.method] != null) payments_by_method[row.method] += amt
+    }
   }
   return {
     folio: r.rows,
     folio_charges: roundMoney(charges),
     folio_payments: roundMoney(payments),
     folio_balance: roundMoney(charges - payments),
+    payments_by_method: {
+      cash: roundMoney(payments_by_method.cash),
+      bank: roundMoney(payments_by_method.bank),
+      card: roundMoney(payments_by_method.card),
+    },
+  }
+}
+
+async function ensureInvoiceNo(bookingId) {
+  const current = await pool.query('SELECT id, invoice_no, status FROM bookings WHERE id = $1', [bookingId])
+  const row = current.rows[0]
+  if (!row) return { error: 'Booking not found.' }
+  if (!['confirmed', 'in_house', 'completed'].includes(row.status)) {
+    return { error: 'An invoice is available after the stay is confirmed.' }
+  }
+  if (row.invoice_no) return { invoice_no: row.invoice_no }
+  const no = `INV-${new Date().getFullYear()}-${String(row.id).padStart(5, '0')}`
+  await pool.query(
+    `UPDATE bookings SET invoice_no = $1, invoiced_at = NOW() WHERE id = $2 AND invoice_no IS NULL`,
+    [no, row.id]
+  )
+  return { invoice_no: no }
+}
+
+async function buildInvoice(bookingId) {
+  const assigned = await ensureInvoiceNo(bookingId)
+  if (assigned.error) return assigned
+  const booking = await loadStaffBooking(bookingId)
+  if (!booking) return { error: 'Booking not found.' }
+  return {
+    invoice_no: booking.invoice_no,
+    invoiced_at: booking.invoiced_at,
+    hotel_name: booking.hotel_name,
+    hotel_location: booking.hotel_location,
+    guest_name: booking.username,
+    guest_email: booking.email,
+    guest_id_type: booking.guest_id_type,
+    guest_id_number: booking.guest_id_number,
+    room_name: booking.room_name,
+    check_in: booking.check_in,
+    check_out: booking.check_out,
+    guests: booking.guests,
+    status: booking.status,
+    channel_name: booking.channel_name,
+    lines: booking.folio || [],
+    folio_charges: booking.folio_charges,
+    folio_payments: booking.folio_payments,
+    folio_balance: booking.folio_balance,
+    payments_by_method: booking.payments_by_method,
   }
 }
 
@@ -2806,8 +3026,9 @@ async function loadStaffBooking(id) {
     `SELECT b.*, u.username, u.email,
             to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
             to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
+            to_char(b.invoiced_at, 'YYYY-MM-DD HH24:MI') AS invoiced_at,
             r.name AS room_name, r.price AS room_price, r.max_persons,
-            h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
+            h.name AS hotel_name, h.location AS hotel_location, c.name AS channel_name, c.code AS channel_code
      FROM bookings b
      JOIN users u ON b.user_id = u.id
      JOIN rooms r ON b.room_id = r.id
@@ -2909,21 +3130,27 @@ function eachNight(checkIn, checkOut) {
   return nights
 }
 
-async function nightlyRate(roomId, hotelId, date, fallbackPrice) {
-  const r = await pool.query(
-    `SELECT price FROM crs_rate_plans
+async function nightlyRate(roomId, hotelId, date, fallbackPrice, db = pool) {
+  const r = await db.query(
+    `SELECT name, price, min_nights FROM crs_rate_plans
      WHERE status = 'active' AND start_date <= $1::date AND end_date >= $1::date
        AND hotel_id = $2 AND (room_id = $3 OR room_id IS NULL)
      ORDER BY CASE WHEN room_id IS NOT NULL THEN 0 ELSE 1 END, id DESC
      LIMIT 1`,
     [date, hotelId, roomId]
   )
-  if (r.rows[0]) return Number(r.rows[0].price)
-  return Number(fallbackPrice || 0)
+  if (r.rows[0]) {
+    return {
+      price: Number(r.rows[0].price),
+      min_nights: Math.max(1, Number(r.rows[0].min_nights || 1)),
+      plan: r.rows[0].name,
+    }
+  }
+  return { price: Number(fallbackPrice || 0), min_nights: 1, plan: null }
 }
 
-async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
-  const room = await pool.query(
+async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null, db = pool) {
+  const room = await db.query(
     `SELECT r.id, r.price, r.status, r.hotel_id, r.name, r.max_persons, h.name AS hotel_name
      FROM rooms r JOIN hotels h ON h.id = r.hotel_id WHERE r.id = $1`,
     [roomId]
@@ -2933,7 +3160,7 @@ async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
   if (row.status === 'maintenance') return { error: 'This room is in maintenance and cannot be booked.' }
   const nights = eachNight(checkIn, checkOut)
   if (!nights.length) return { error: 'Check-out must be after check-in.' }
-  const overlap = await pool.query(
+  const overlap = await db.query(
     `SELECT id FROM bookings
      WHERE room_id = $1 AND status = ANY($4::text[])
        AND check_in < $3::date AND check_out > $2::date
@@ -2942,7 +3169,7 @@ async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
     [roomId, checkIn, checkOut, HOLDING_STATUSES, excludeBookingId]
   )
   if (overlap.rows[0]) return { error: 'Those dates are already reserved.' }
-  const closed = await pool.query(
+  const closed = await db.query(
     `SELECT id FROM crs_stopsell
      WHERE room_id = $1 AND start_date < $3::date AND end_date >= $2::date
      LIMIT 1`,
@@ -2950,11 +3177,18 @@ async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
   )
   if (closed.rows[0]) return { error: 'Those dates are closed for sale.' }
   const nightly = []
+  const plans = new Set()
   let total = 0
+  let minNights = 1
   for (const date of nights) {
-    const price = await nightlyRate(row.id, row.hotel_id, date, row.price)
-    nightly.push({ date, price })
-    total += price
+    const rate = await nightlyRate(row.id, row.hotel_id, date, row.price, db)
+    nightly.push({ date, price: rate.price, plan: rate.plan })
+    total += rate.price
+    if (rate.min_nights > minNights) minNights = rate.min_nights
+    if (rate.plan) plans.add(rate.plan)
+  }
+  if (nights.length < minNights) {
+    return { error: `This rate needs at least ${minNights} nights.` }
   }
   return {
     room_id: row.id,
@@ -2964,8 +3198,34 @@ async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null) {
     check_in: checkIn,
     check_out: checkOut,
     nights: nights.length,
+    min_nights: minNights,
+    rate_name: plans.size === 1 ? [...plans][0] : plans.size ? 'Mixed rates' : null,
     nightly,
-    total: Math.round(total * 100) / 100,
+    total: roundMoney(total),
+  }
+}
+
+async function attachSellInfo(row, checkIn, checkOut) {
+  if (checkIn && checkOut) {
+    const quote = await crsQuote(row.id, checkIn, checkOut)
+    if (quote.error) {
+      return { ...row, from_price: Number(row.price), available: false, sell_error: quote.error }
+    }
+    return {
+      ...row,
+      from_price: Number(quote.nightly[0]?.price ?? row.price),
+      available: true,
+      quote_total: quote.total,
+      quote_nights: quote.nights,
+      min_nights: quote.min_nights,
+    }
+  }
+  const today = ymd(new Date())
+  const rate = await nightlyRate(row.id, row.hotel_id, today, row.price)
+  return {
+    ...row,
+    from_price: rate.price,
+    available: String(row.status) !== 'maintenance',
   }
 }
 
@@ -3182,16 +3442,16 @@ app.get('/api/crs/availability', async (req, res) => {
     const hotelId = req.query.hotel_id ? parseInt(req.query.hotel_id, 10) : null
     const roomsQ = hotelId
       ? await pool.query(
-          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, h.name AS hotel_name
+          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, r.price AS base_price, r.hotel_id, h.name AS hotel_name
            FROM rooms r JOIN hotels h ON h.id = r.hotel_id WHERE r.hotel_id = $1 ORDER BY h.name, r.name`,
           [hotelId]
         )
       : await pool.query(
-          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, h.name AS hotel_name
+          `SELECT r.id AS room_id, r.name AS room_name, r.status AS room_status, r.price AS base_price, r.hotel_id, h.name AS hotel_name
            FROM rooms r JOIN hotels h ON h.id = r.hotel_id ORDER BY h.name, r.name`
         )
     const bookings = await pool.query(
-      `SELECT room_id, to_char(check_in, 'YYYY-MM-DD') AS check_in, to_char(check_out, 'YYYY-MM-DD') AS check_out
+      `SELECT id, room_id, status, to_char(check_in, 'YYYY-MM-DD') AS check_in, to_char(check_out, 'YYYY-MM-DD') AS check_out
        FROM bookings
        WHERE status = ANY($3::text[])
          AND check_in < $2::date AND check_out > $1::date`,
@@ -3203,6 +3463,30 @@ app.get('/api/crs/availability', async (req, res) => {
        WHERE start_date <= $2::date AND end_date >= $1::date`,
       [start, end]
     )
+    const ratePlans = await pool.query(
+      `SELECT hotel_id, room_id, name, price, min_nights,
+              to_char(start_date, 'YYYY-MM-DD') AS start_date,
+              to_char(end_date, 'YYYY-MM-DD') AS end_date
+       FROM crs_rate_plans
+       WHERE status = 'active' AND start_date <= $2::date AND end_date >= $1::date`,
+      [start, end]
+    )
+    function rateFor(room, date) {
+      const plans = ratePlans.rows.filter(
+        (p) =>
+          Number(p.hotel_id) === Number(room.hotel_id) &&
+          p.start_date <= date &&
+          p.end_date >= date &&
+          (p.room_id == null || Number(p.room_id) === Number(room.room_id))
+      )
+      const roomPlan = plans.find((p) => p.room_id != null)
+      const hotelPlan = plans.find((p) => p.room_id == null)
+      const plan = roomPlan || hotelPlan
+      if (plan) {
+        return { rate: Number(plan.price), plan: plan.name, min_nights: Math.max(1, Number(plan.min_nights || 1)) }
+      }
+      return { rate: Number(room.base_price), plan: null, min_nights: 1 }
+    }
     const rooms = roomsQ.rows.map((room) => {
       const cells = {}
       for (const date of dates) {
@@ -3214,13 +3498,18 @@ app.get('/api/crs/availability', async (req, res) => {
           (b) => b.room_id === room.room_id && b.check_in <= date && b.check_out > date
         )
         if (booked) {
-          cells[date] = { status: 'booked' }
+          cells[date] = { status: 'booked', booking_id: booked.id, booking_status: booked.status }
           continue
         }
         const stop = stops.rows.find(
           (s) => s.room_id === room.room_id && s.start_date <= date && s.end_date >= date
         )
-        cells[date] = stop ? { status: 'blocked', stop_id: stop.id } : { status: 'available' }
+        if (stop) {
+          cells[date] = { status: 'blocked', stop_id: stop.id }
+          continue
+        }
+        const sell = rateFor(room, date)
+        cells[date] = { status: 'available', rate: sell.rate, plan: sell.plan, min_nights: sell.min_nights }
       }
       return { ...room, cells }
     })
@@ -4691,6 +4980,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 pool.query('SELECT 1').then(async () => {
   await ensureCrmTables()
   await ensureCrsTables()
+  await ensureInventoryLock()
   await ensureBookingOps()
   await ensureGalleryColumns()
   await ensureFinanceTables()

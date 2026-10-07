@@ -50,7 +50,10 @@
             </ul>
           </div>
           <div class="rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-            <p class="text-2xl font-semibold text-stone-800">{{ formatMoney(room.price) }} <span class="text-base font-normal text-stone-500">per night</span></p>
+            <p class="text-2xl font-semibold text-stone-800">
+              {{ formatMoney(room.from_price ?? room.price) }}
+              <span class="text-base font-normal text-stone-500">per night</span>
+            </p>
             <form v-if="isLoggedIn" class="mt-6 space-y-4" @submit.prevent="submitBooking">
               <div>
                 <label class="block text-sm font-medium text-stone-700">Check-in</label>
@@ -80,7 +83,17 @@
                 </select>
               </div>
               <p v-if="quoteError" class="text-sm text-red-600">{{ quoteError }}</p>
-              <p v-else-if="totalPrice" class="text-lg font-medium text-stone-800">Total: {{ formatMoney(totalPrice) }} <span class="text-sm font-normal text-stone-500">{{ quoteNights ? `· ${quoteNights} night${quoteNights === 1 ? '' : 's'}` : '' }}</span></p>
+              <p v-else-if="quoteLoading" class="text-sm text-stone-500">Checking rates and availability…</p>
+              <div v-else-if="quote" class="space-y-1">
+                <p class="text-lg font-medium text-stone-800">
+                  Total: {{ formatMoney(quote.total) }}
+                  <span class="text-sm font-normal text-stone-500">· {{ quote.nights }} night{{ quote.nights === 1 ? '' : 's' }}</span>
+                </p>
+                <p v-if="quote.rate_name" class="text-xs text-stone-500">{{ quote.rate_name }}{{ quote.min_nights > 1 ? ` · min ${quote.min_nights} nights` : '' }}</p>
+                <ul v-if="quote.nightly?.length" class="max-h-28 overflow-auto text-xs text-stone-500">
+                  <li v-for="n in quote.nightly" :key="n.date">{{ n.date }} · {{ formatMoney(n.price) }}</li>
+                </ul>
+              </div>
               <p v-if="bookingError" class="text-sm text-red-600">{{ bookingError }}</p>
               <p v-if="bookingSuccess" class="text-sm text-green-600">{{ bookingSuccess }}</p>
               <router-link
@@ -92,7 +105,7 @@
               </router-link>
               <button
                 type="submit"
-                :disabled="bookingLoading || !!quoteError"
+                :disabled="bookingLoading || quoteLoading || !quote || !!quoteError"
                 class="w-full rounded-lg bg-brand-600 py-2.5 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
               >
                 {{ bookingLoading ? 'Booking…' : 'Request booking' }}
@@ -132,8 +145,8 @@ const form = ref({
 const bookingError = ref('')
 const bookingSuccess = ref('')
 const bookingLoading = ref(false)
-const quoteTotal = ref(null)
-const quoteNights = ref(0)
+const quote = ref(null)
+const quoteLoading = ref(false)
 const quoteError = ref('')
 
 const gallery = computed(() => {
@@ -143,14 +156,7 @@ const gallery = computed(() => {
   return [cover, ...extras]
 })
 
-const totalPrice = computed(() => {
-  if (quoteTotal.value != null) return quoteTotal.value
-  if (!room.value || !form.value.check_in || !form.value.check_out) return 0
-  const a = new Date(form.value.check_in)
-  const b = new Date(form.value.check_out)
-  const nights = Math.max(0, Math.ceil((b - a) / (24 * 60 * 60 * 1000)))
-  return nights * Number(room.value.price)
-})
+const totalPrice = computed(() => (quote.value ? Number(quote.value.total) : 0))
 
 async function loadRoom() {
   loading.value = true
@@ -158,6 +164,8 @@ async function loadRoom() {
   room.value = await getRoom(route.params.id)
   activePhoto.value = 0
   if (room.value) form.value.guests = Math.min(form.value.guests, room.value.max_persons)
+  if (typeof route.query.check_in === 'string') form.value.check_in = route.query.check_in
+  if (typeof route.query.check_out === 'string') form.value.check_out = route.query.check_out
   loading.value = false
 }
 
@@ -187,6 +195,10 @@ async function submitBooking() {
     bookingError.value = quoteError.value
     return
   }
+  if (!quote.value || quoteLoading.value) {
+    bookingError.value = 'Wait for the rate and availability check before booking.'
+    return
+  }
   bookingLoading.value = true
   try {
     await createBooking({
@@ -206,19 +218,18 @@ async function submitBooking() {
 }
 
 async function refreshQuote() {
-  quoteTotal.value = null
-  quoteNights.value = 0
+  quote.value = null
   quoteError.value = ''
   const checkIn = form.value.check_in
   const checkOut = form.value.check_out
   if (!room.value || !checkIn || !checkOut || checkOut <= checkIn) return
+  quoteLoading.value = true
   try {
-    const q = await getCrsQuote({ room_id: room.value.id, check_in: checkIn, check_out: checkOut })
-    quoteTotal.value = Number(q.total)
-    quoteNights.value = Number(q.nights || 0)
+    quote.value = await getCrsQuote({ room_id: room.value.id, check_in: checkIn, check_out: checkOut })
   } catch (e) {
     quoteError.value = e.message
   }
+  quoteLoading.value = false
 }
 
 watch(() => [form.value.check_in, form.value.check_out, room.value?.id], refreshQuote)

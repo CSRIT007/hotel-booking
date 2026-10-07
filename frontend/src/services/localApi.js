@@ -199,6 +199,15 @@ export async function checkOutBooking(id, payload) {
   }
 }
 
+export async function getBookingInvoice(id) {
+  try {
+    const { data } = await client.get(`/api/bookings/${id}/invoice`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to load invoice')
+  }
+}
+
 export async function getContacts() {
   const { data } = await client.get('/api/contacts')
   return Array.isArray(data) ? data : []

@@ -2,7 +2,7 @@
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Rates</h1>
     <p class="mt-1 text-stone-600">
-      Set nightly prices by property or room and date range. Direct bookings use these rates; if none apply, the room’s base price is used.
+      Set nightly prices by property or room. Website bookings, staff create, date changes, and check-in room moves all use these rates. “To” is the last night sold at this price. Min nights is enforced when quoting. If no plan applies, the room’s base price is used.
     </p>
 
     <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -37,7 +37,7 @@
               <input v-model="form.start_date" type="date" required class="field" />
             </div>
             <div>
-              <label class="block text-xs font-medium text-stone-700">To</label>
+              <label class="block text-xs font-medium text-stone-700">To (last night)</label>
               <input v-model="form.end_date" type="date" required class="field" />
             </div>
           </div>
@@ -61,6 +61,7 @@
               <th class="px-3 py-3 text-left font-medium text-stone-700">Applies to</th>
               <th class="px-3 py-3 text-left font-medium text-stone-700">Dates</th>
               <th class="px-3 py-3 text-right font-medium text-stone-700">Nightly</th>
+              <th class="px-3 py-3 text-right font-medium text-stone-700">Min</th>
               <th class="px-3 py-3 text-left font-medium text-stone-700">Actions</th>
             </tr>
           </thead>
@@ -76,6 +77,7 @@
               </td>
               <td class="whitespace-nowrap px-3 py-3 text-stone-600">{{ row.start_date }} → {{ row.end_date }}</td>
               <td class="px-3 py-3 text-right font-medium">{{ formatMoney(row.price) }}</td>
+              <td class="px-3 py-3 text-right text-stone-600">{{ row.min_nights || 1 }}</td>
               <td class="whitespace-nowrap px-3 py-3">
                 <button type="button" class="mr-2 text-brand-700 hover:underline" @click="toggle(row)">
                   {{ row.status === 'active' ? 'Pause' : 'Activate' }}
@@ -85,7 +87,7 @@
             </tr>
           </tbody>
         </table>
-        <p v-if="rates.length === 0 && !loading" class="p-4 text-center text-stone-500">No rate plans yet. Add one to override room prices on Direct bookings.</p>
+        <p v-if="rates.length === 0 && !loading" class="p-4 text-center text-stone-500">No rate plans yet. Add one to override room prices on website and staff bookings.</p>
       </div>
     </div>
   </div>
