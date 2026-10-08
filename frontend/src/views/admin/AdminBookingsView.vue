@@ -318,8 +318,21 @@
     </section>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-      <div class="flex flex-col gap-3 border-b border-stone-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <p class="text-sm font-medium text-stone-700">All bookings</p>
+      <div class="flex flex-col gap-3 border-b border-stone-200 px-4 py-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-sm font-medium text-stone-700">Bookings</p>
+          <ReportExportButton
+            report-id="bookings"
+            filename="bookings"
+            :from="from"
+            :to="to"
+            :rows="filteredBookings"
+            :columns="bookingExportColumns"
+            :disabled="loading"
+          />
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <ReportPeriodBar v-model:from="from" v-model:to="to" />
         <div class="flex flex-wrap gap-1.5">
           <button
             v-for="tab in filterTabs"
@@ -331,6 +344,7 @@
           >
             {{ tab.label }} <span class="opacity-70">{{ tab.n }}</span>
           </button>
+        </div>
         </div>
       </div>
       <div class="overflow-x-auto">
@@ -436,6 +450,8 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConfirmModal from '../../components/ConfirmModal.vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
 import StayInvoice from '../../components/StayInvoice.vue'
 import {
   addFolioItem,
@@ -453,6 +469,8 @@ import {
 } from '../../services/data'
 import { folioCategoryLabel, payMethodLabel } from '../../utils/invoice'
 import { formatMoney } from '../../utils/money'
+import { overlapsDateRange, roomCollected } from '../../services/finance'
+import { useReportPeriod } from '../../composables/useReportPeriod'
 import { opsStatusLabel } from '../../utils/rooms'
 
 const emptyForm = () => ({
@@ -517,13 +535,29 @@ const guestChoices = computed(() => {
   return Array.from({ length: max }, (_, i) => i + 1)
 })
 
+const { from, to } = useReportPeriod()
+const periodBookings = computed(() =>
+  bookings.value.filter((b) => overlapsDateRange(b.check_in, b.check_out, from.value, to.value))
+)
 const filteredBookings = computed(() => {
-  if (!statusFilter.value) return bookings.value
-  return bookings.value.filter((b) => b.status === statusFilter.value)
+  if (!statusFilter.value) return periodBookings.value
+  return periodBookings.value.filter((b) => b.status === statusFilter.value)
 })
+const bookingExportColumns = [
+  { label: 'ID', key: 'id' },
+  { label: 'Guest', key: 'username' },
+  { label: 'Email', key: 'email' },
+  { label: 'Room', key: 'room_name' },
+  { label: 'Property', key: 'hotel_name' },
+  { label: 'Check-in', key: 'check_in' },
+  { label: 'Check-out', key: 'check_out' },
+  { label: 'Status', key: 'status' },
+  { label: 'Quoted', key: 'total_price' },
+  { label: 'Collected', value: (row) => roomCollected(row) },
+]
 
 const filterTabs = computed(() => {
-  const all = bookings.value
+  const all = periodBookings.value
   const count = (status) => all.filter((b) => b.status === status).length
   return [
     { value: '', label: 'All', n: all.length },

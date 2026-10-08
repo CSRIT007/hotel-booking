@@ -5257,7 +5257,7 @@ async function buildAnalytics(from, to) {
 }
 
 app.get('/api/analytics', async (req, res) => {
-  if (!requireStaff(req, res)) return
+  if (!requireManager(req, res)) return
   try {
     const { from, to } = parseAnalyticsRange(req.query)
     res.json(await buildAnalytics(from, to))

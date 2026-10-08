@@ -52,8 +52,15 @@
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-        <div class="border-b border-stone-200 px-4 py-3">
-          <input v-model="query" type="search" class="w-full rounded-md border border-stone-300 px-3 py-1.5 text-sm" placeholder="Search name, phone, email, or ID" @keyup.enter="load" />
+        <div class="flex flex-wrap items-center gap-3 border-b border-stone-200 px-4 py-3">
+          <input v-model="query" type="search" class="min-w-[12rem] flex-1 rounded-md border border-stone-300 px-3 py-1.5 text-sm" placeholder="Search name, phone, email, or ID" @keyup.enter="load" />
+          <ReportExportButton
+            report-id="guests"
+            filename="guests"
+            :rows="guests"
+            :columns="guestExportColumns"
+            :disabled="loading"
+          />
         </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-stone-200 text-sm">
@@ -132,8 +139,19 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { createGuest, getGuest, getGuests, updateGuest } from '../../services/data'
 import { formatMoney } from '../../utils/money'
+
+const guestExportColumns = [
+  { label: 'Name', value: (row) => row.full_name || row.username },
+  { label: 'Phone', key: 'phone' },
+  { label: 'Email', key: 'email' },
+  { label: 'ID type', key: 'id_type' },
+  { label: 'ID number', key: 'id_number' },
+  { label: 'Stays', key: 'stayed' },
+  { label: 'Notes', key: 'notes' },
+]
 
 const guests = ref([])
 const detail = ref(null)

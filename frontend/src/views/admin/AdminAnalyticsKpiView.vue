@@ -5,6 +5,16 @@
       Occupancy, ADR, and RevPAR use confirmed and completed stays in the selected dates. Comparison is the previous period of the same length.
     </p>
 
+    <div class="mt-4 flex justify-end">
+      <ReportExportButton
+        report-id="kpis"
+        :from="from"
+        :to="to"
+        :rows="kpiExportRows"
+        :columns="kpiExportColumns"
+        :disabled="loading"
+      />
+    </div>
     <FinanceDateFilter v-model:from="from" v-model:to="to" />
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -125,6 +135,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { createGuestSatisfaction, getAnalytics } from '../../services/data'
 import { dateRangePresets } from '../../services/finance'
 import { formatMoney } from '../../utils/money'
@@ -154,6 +165,21 @@ const headline = computed(() => [
   { key: 'revpar', label: 'RevPAR', display: formatMoney(data.value.kpis?.revpar?.value), delta: data.value.kpis?.revpar?.delta },
   { key: 'cancel', label: 'Cancellation rate', display: formatPct(data.value.kpis?.cancel_rate?.value), delta: data.value.kpis?.cancel_rate?.delta, invert: true },
 ])
+const kpiExportRows = computed(() => [
+  ...headline.value.map((row) => ({ metric: row.label, value: row.display, vs_prior: formatDelta(row.delta) })),
+  { metric: 'Arrivals', value: num(data.value.kpis?.arrivals?.value), vs_prior: '' },
+  { metric: 'Departures', value: num(data.value.kpis?.departures?.value), vs_prior: '' },
+  { metric: 'Guests stayed', value: num(data.value.kpis?.guests?.value), vs_prior: '' },
+  { metric: 'Room revenue', value: formatMoney(data.value.kpis?.room_revenue?.value), vs_prior: '' },
+  { metric: 'POS paid', value: formatMoney(data.value.profit?.pos), vs_prior: '' },
+  { metric: 'Expenses', value: formatMoney(data.value.profit?.expenses), vs_prior: '' },
+  { metric: 'Net', value: formatMoney(data.value.profit?.profit), vs_prior: '' },
+])
+const kpiExportColumns = [
+  { label: 'Metric', key: 'metric' },
+  { label: 'Value', key: 'value' },
+  { label: 'Vs prior', key: 'vs_prior' },
+]
 
 function num(v) {
   return Number(v || 0)

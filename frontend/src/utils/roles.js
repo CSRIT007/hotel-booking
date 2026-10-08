@@ -43,6 +43,7 @@ export function canAccessAdminPath(role, path) {
     '/admin/pos-transactions',
     '/admin/crs-availability',
     '/admin/maintenance-requests',
+    '/admin/reports',
   ]
   if (raw === '/admin' || raw === '/admin/') return true
   return frontDesk.some((p) => p !== '/admin' && (raw === p || raw.startsWith(`${p}/`)))

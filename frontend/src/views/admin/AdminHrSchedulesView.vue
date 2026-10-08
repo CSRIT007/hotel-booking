@@ -60,6 +60,18 @@
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 px-4 py-3">
+          <ReportPeriodBar v-model:from="from" v-model:to="to" />
+          <ReportExportButton
+            report-id="hr-schedules"
+            filename="schedules"
+            :from="from"
+            :to="to"
+            :rows="visibleSchedules"
+            :columns="scheduleExportColumns"
+            :disabled="loading"
+          />
+        </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-stone-200 text-sm">
             <thead class="bg-stone-50">
@@ -73,7 +85,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-200">
-              <tr v-for="s in schedules" :key="s.id" class="hover:bg-stone-50">
+              <tr v-for="s in visibleSchedules" :key="s.id" class="hover:bg-stone-50">
                 <td class="whitespace-nowrap px-4 py-3 text-stone-600">{{ s.shift_date }}</td>
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ s.full_name }}</p>
@@ -93,7 +105,7 @@
             </tbody>
           </table>
         </div>
-        <p v-if="schedules.length === 0 && !loading" class="p-4 text-center text-stone-500">No shifts yet.</p>
+        <p v-if="visibleSchedules.length === 0 && !loading" class="p-4 text-center text-stone-500">No shifts in this period.</p>
       </div>
     </div>
   </div>
@@ -101,11 +113,29 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
+import { filterByDateRange } from '../../services/finance'
 import { createHrSchedule, deleteHrSchedule, getHrEmployees, getHrSchedules, updateHrSchedule } from '../../services/data'
 import { HR_SHIFT_TYPES, statusClass, todayKey } from '../../services/hr'
 
 const employees = ref([])
 const schedules = ref([])
+const { from, to } = useReportPeriod()
+const visibleSchedules = computed(() =>
+  filterByDateRange(schedules.value, from.value, to.value, (s) => s.shift_date)
+)
+const scheduleExportColumns = [
+  { label: 'Date', key: 'shift_date' },
+  { label: 'Employee', key: 'full_name' },
+  { label: 'Department', key: 'department' },
+  { label: 'Position', key: 'position' },
+  { label: 'Start', key: 'shift_start' },
+  { label: 'End', key: 'shift_end' },
+  { label: 'Type', key: 'shift_type' },
+  { label: 'Status', key: 'status' },
+]
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')

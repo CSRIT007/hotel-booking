@@ -60,6 +60,18 @@
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 px-4 py-3">
+          <ReportPeriodBar v-model:from="from" v-model:to="to" />
+          <ReportExportButton
+            report-id="hr-leaves"
+            filename="leaves"
+            :from="from"
+            :to="to"
+            :rows="visibleLeaves"
+            :columns="leaveExportColumns"
+            :disabled="loading"
+          />
+        </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-stone-200 text-sm">
             <thead class="bg-stone-50">
@@ -73,7 +85,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-200">
-              <tr v-for="l in leaves" :key="l.id" class="hover:bg-stone-50">
+              <tr v-for="l in visibleLeaves" :key="l.id" class="hover:bg-stone-50">
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ l.full_name }}</p>
                   <p class="text-xs text-stone-500">{{ l.department }} · {{ l.position }}</p>
@@ -94,7 +106,7 @@
             </tbody>
           </table>
         </div>
-        <p v-if="leaves.length === 0 && !loading" class="p-4 text-center text-stone-500">No leave requests yet.</p>
+        <p v-if="visibleLeaves.length === 0 && !loading" class="p-4 text-center text-stone-500">No leave requests in this period.</p>
       </div>
     </div>
   </div>
@@ -102,11 +114,29 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
+import { overlapsDateRange } from '../../services/finance'
 import { createHrLeave, deleteHrLeave, getHrEmployees, getHrLeaves, updateHrLeave } from '../../services/data'
 import { HR_LEAVE_TYPES, daysInclusive, statusClass, todayKey } from '../../services/hr'
 
 const employees = ref([])
 const leaves = ref([])
+const { from, to } = useReportPeriod()
+const visibleLeaves = computed(() =>
+  leaves.value.filter((l) => overlapsDateRange(l.start_date, l.end_date, from.value, to.value))
+)
+const leaveExportColumns = [
+  { label: 'Employee', key: 'full_name' },
+  { label: 'Department', key: 'department' },
+  { label: 'Type', key: 'leave_type' },
+  { label: 'Start', key: 'start_date' },
+  { label: 'End', key: 'end_date' },
+  { label: 'Days', key: 'days_count' },
+  { label: 'Status', key: 'status' },
+  { label: 'Reason', key: 'reason' },
+]
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')

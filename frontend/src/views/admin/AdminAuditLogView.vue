@@ -3,7 +3,8 @@
     <h1 class="text-2xl font-semibold text-stone-800">Audit log</h1>
     <p class="mt-1 text-stone-600">Who did what, from which IP and device. Logins, bookings, properties, rooms, messages, POS, and expenses.</p>
 
-    <div class="mt-6 flex flex-wrap gap-3">
+    <div class="mt-6 flex flex-wrap items-end gap-3">
+      <ReportPeriodBar v-model:from="from" v-model:to="to" />
       <select v-model="entity" class="rounded-md border border-stone-300 px-3 py-2 text-sm" @change="load">
         <option value="">All types</option>
         <option value="user">Accounts</option>
@@ -25,6 +26,15 @@
         <option value="login_failed">Failed login</option>
         <option value="register">Register</option>
       </select>
+      <ReportExportButton
+        report-id="audit-log"
+        filename="audit-log"
+        :from="from"
+        :to="to"
+        :rows="visibleLogs"
+        :columns="auditExportColumns"
+        :disabled="loading"
+      />
     </div>
 
     <div class="mt-4 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
@@ -40,7 +50,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
-            <tr v-for="row in logs" :key="row.id" class="hover:bg-stone-50">
+            <tr v-for="row in visibleLogs" :key="row.id" class="hover:bg-stone-50">
               <td class="whitespace-nowrap px-4 py-3 text-stone-500">{{ formatWhen(row.created_at) }}</td>
               <td class="px-4 py-3">
                 <span class="font-medium text-stone-800">{{ row.actor_name || 'Guest' }}</span>
@@ -61,17 +71,34 @@
           </tbody>
         </table>
       </div>
-      <p v-if="logs.length === 0 && !loading" class="p-4 text-center text-stone-500">No audit entries yet. Staff actions will appear here.</p>
+      <p v-if="visibleLogs.length === 0 && !loading" class="p-4 text-center text-stone-500">No audit entries in this period.</p>
       <p v-if="loading" class="p-4 text-center text-stone-500">Loading…</p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
+import { filterByDateRange } from '../../services/finance'
 import { getAuditLogs } from '../../services/data'
 
 const logs = ref([])
+const { from, to } = useReportPeriod()
+const visibleLogs = computed(() =>
+  filterByDateRange(logs.value, from.value, to.value, (row) => row.created_at)
+)
+const auditExportColumns = [
+  { label: 'When', value: (row) => formatWhen(row.created_at) },
+  { label: 'Who', key: 'actor_name' },
+  { label: 'Role', key: 'actor_role' },
+  { label: 'Action', key: 'action' },
+  { label: 'IP', key: 'ip_address' },
+  { label: 'Device', key: 'device' },
+  { label: 'Summary', key: 'summary' },
+]
 const loading = ref(true)
 const entity = ref('')
 const action = ref('')

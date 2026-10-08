@@ -95,6 +95,18 @@
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 px-4 py-3">
+          <ReportPeriodBar v-model:from="from" v-model:to="to" />
+          <ReportExportButton
+            report-id="maintenance-requests"
+            filename="maintenance-requests"
+            :from="from"
+            :to="to"
+            :rows="visibleRequests"
+            :columns="maintenanceExportColumns"
+            :disabled="loading"
+          />
+        </div>
         <table class="min-w-full divide-y divide-stone-200 text-sm">
           <thead class="bg-stone-50">
             <tr>
@@ -106,7 +118,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
-            <tr v-for="row in requests" :key="row.id" class="hover:bg-stone-50">
+            <tr v-for="row in visibleRequests" :key="row.id" class="hover:bg-stone-50">
               <td class="px-4 py-3">
                 <p class="font-semibold text-stone-900">#{{ row.id }} {{ row.room_name || row.location }}</p>
                 <p class="text-xs capitalize text-stone-500">{{ row.request_type }} · {{ row.category }}</p>
@@ -145,17 +157,38 @@
             </tr>
           </tbody>
         </table>
-        <p v-if="requests.length === 0 && !loading" class="p-4 text-center text-stone-500">No work orders yet.</p>
+        <p v-if="visibleRequests.length === 0 && !loading" class="p-4 text-center text-stone-500">No work orders in this period.</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
+import { filterByDateRange } from '../../services/finance'
 import { createMaintenanceRequest, deleteMaintenanceRequest, getMaintenanceRequests, updateMaintenanceRequest } from '../../services/data'
 
 const requests = ref([])
+const { from, to } = useReportPeriod()
+const visibleRequests = computed(() =>
+  filterByDateRange(requests.value, from.value, to.value, (row) => row.created_at || row.scheduled_date)
+)
+const maintenanceExportColumns = [
+  { label: 'ID', key: 'id' },
+  { label: 'Created', key: 'created_at' },
+  { label: 'Room', value: (row) => row.room_name || row.location },
+  { label: 'Type', key: 'request_type' },
+  { label: 'Category', key: 'category' },
+  { label: 'Priority', key: 'priority' },
+  { label: 'Status', key: 'status' },
+  { label: 'Assigned', key: 'assigned_name' },
+  { label: 'Description', key: 'description' },
+  { label: 'Estimated cost', key: 'estimated_cost' },
+  { label: 'Actual cost', key: 'actual_cost' },
+]
 const rooms = ref([])
 const staff = ref([])
 const costs = reactive({})

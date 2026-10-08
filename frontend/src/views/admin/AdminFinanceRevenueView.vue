@@ -79,8 +79,16 @@
     </div>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-      <div class="border-b border-stone-200 px-4 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
         <h2 class="font-semibold text-stone-800">Room stays counted as collected revenue</h2>
+        <ReportExportButton
+          report-id="finance-revenue"
+          :from="from"
+          :to="to"
+          :rows="summary.roomItems"
+          :columns="revenueExportColumns"
+          :disabled="loading"
+        />
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-stone-200 text-sm">
@@ -151,6 +159,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { getBookings, getPosTransactions } from '../../services/data'
 import {
   bookingFinanceDate,
@@ -192,6 +201,16 @@ function barWidth(part, total) {
   if (!total) return '0%'
   return `${Math.max(0, Math.min(100, (part / total) * 100))}%`
 }
+
+const revenueExportColumns = [
+  { label: 'Date', value: (row) => formatDate(bookingFinanceDate(row)) },
+  { label: 'ID', key: 'id' },
+  { label: 'Guest', value: (row) => row.username || row.email },
+  { label: 'Room', key: 'room_name' },
+  { label: 'Status', key: 'status' },
+  { label: 'Quoted', key: 'total_price' },
+  { label: 'Collected', key: 'folio_payments' },
+]
 
 onMounted(async () => {
   loading.value = true

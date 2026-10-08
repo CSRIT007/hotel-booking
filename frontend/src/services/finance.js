@@ -81,6 +81,16 @@ export function filterByDateRange(items, from, to, getDate) {
   return list.slice().sort((a, b) => toDateKey(getDate(b)).localeCompare(toDateKey(getDate(a))))
 }
 
+export function overlapsDateRange(start, end, from, to) {
+  const s = toDateKey(start)
+  const e = toDateKey(end) || s
+  if (!from && !to) return true
+  if (!s) return false
+  if (from && e && e < from) return false
+  if (to && s > to) return false
+  return true
+}
+
 export function dateRangePresets(now = new Date()) {
   const today = localDateKey(now)
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`

@@ -108,14 +108,14 @@
           </div>
         </div>
 
-        <div v-if="canSee('/admin/reports')" class="admin-nav-group">
+        <div v-if="canSee('/admin/reports') || canSee('/admin/analytics-kpi')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('analytics')">
             <span><span class="w-6 text-center inline-block">📊</span> Analytics</span>
             <span>{{ openGroup === 'analytics' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'analytics'" class="admin-sub">
-            <router-link to="/admin/reports" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/reports') }">Reports</router-link>
-            <router-link to="/admin/analytics-kpi" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/analytics-kpi') }">KPIs</router-link>
+            <router-link v-if="canSee('/admin/reports')" to="/admin/reports" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/reports') }">Reports</router-link>
+            <router-link v-if="canSee('/admin/analytics-kpi')" to="/admin/analytics-kpi" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/analytics-kpi') }">KPIs</router-link>
           </div>
         </div>
 

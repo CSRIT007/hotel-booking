@@ -65,8 +65,16 @@
     </div>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
-      <div class="border-b border-stone-200 px-4 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
         <h2 class="font-semibold text-stone-800">Monthly profit</h2>
+        <ReportExportButton
+          report-id="finance-profit"
+          :from="from"
+          :to="to"
+          :rows="months"
+          :columns="profitExportColumns"
+          :disabled="loading"
+        />
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-stone-200 text-sm">
@@ -101,6 +109,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { getBookings, getExpenses, getPosTransactions } from '../../services/data'
 import {
   bookingFinanceDate,
@@ -122,6 +131,12 @@ const monthRange = dateRangePresets().month
 const from = ref(monthRange.from)
 const to = ref(monthRange.to)
 
+const profitExportColumns = [
+  { label: 'Month', key: 'month' },
+  { label: 'Revenue', key: 'revenue' },
+  { label: 'Expenses', key: 'expenses' },
+  { label: 'Profit', key: 'profit' },
+]
 const rangedBookings = computed(() =>
   filterByDateRange(bookings.value, from.value, to.value, bookingFinanceDate)
 )

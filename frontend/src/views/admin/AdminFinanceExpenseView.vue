@@ -111,6 +111,16 @@
     </div>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+      <div class="flex items-center justify-end border-b border-stone-200 px-4 py-3">
+        <ReportExportButton
+          report-id="finance-expenses"
+          :from="from"
+          :to="to"
+          :rows="visibleExpenses"
+          :columns="expenseExportColumns"
+          :disabled="loading"
+        />
+      </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-stone-200 text-sm">
           <thead class="bg-stone-50">
@@ -150,6 +160,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import FinanceDateFilter from '../../components/FinanceDateFilter.vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { createExpense, deleteExpense, getExpenses } from '../../services/data'
 import {
   EXPENSE_CATEGORIES,
@@ -183,6 +194,14 @@ const form = reactive({
 const visibleExpenses = computed(() =>
   filterByDateRange(expenses.value, from.value, to.value, expenseFinanceDate)
 )
+const expenseExportColumns = [
+  { label: 'Date', value: (row) => formatDate(row.expense_date) },
+  { label: 'Description', key: 'description' },
+  { label: 'Category', key: 'category' },
+  { label: 'Payment', key: 'payment_method' },
+  { label: 'Amount', key: 'amount' },
+  { label: 'Payroll ID', key: 'payroll_id' },
+]
 const totalAmount = computed(() => visibleExpenses.value.reduce((sum, e) => sum + toMoney(e.amount), 0))
 const byCategory = computed(() => groupSum(visibleExpenses.value, (e) => e.category, (e) => e.amount))
 

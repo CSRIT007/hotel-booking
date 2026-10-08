@@ -84,6 +84,18 @@
       </form>
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 px-4 py-3">
+          <ReportPeriodBar v-model:from="from" v-model:to="to" />
+          <ReportExportButton
+            report-id="hr-payroll"
+            filename="payroll"
+            :from="from"
+            :to="to"
+            :rows="visiblePayroll"
+            :columns="payrollExportColumns"
+            :disabled="loading"
+          />
+        </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-stone-200 text-sm">
             <thead class="bg-stone-50">
@@ -97,7 +109,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-200">
-              <tr v-for="p in payroll" :key="p.id" class="hover:bg-stone-50">
+              <tr v-for="p in visiblePayroll" :key="p.id" class="hover:bg-stone-50">
                 <td class="px-4 py-3">
                   <p class="font-medium text-stone-800">{{ p.full_name }}</p>
                   <p class="text-xs text-stone-500">{{ p.department }} · {{ p.position }} · {{ p.employee_code }}</p>
@@ -121,7 +133,7 @@
             </tbody>
           </table>
         </div>
-        <p v-if="payroll.length === 0 && !loading" class="p-4 text-center text-stone-500">No payroll records yet.</p>
+        <p v-if="visiblePayroll.length === 0 && !loading" class="p-4 text-center text-stone-500">No payroll records in this period.</p>
       </div>
     </div>
   </div>
@@ -129,6 +141,10 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
+import { overlapsDateRange } from '../../services/finance'
 import { createHrPayroll, deleteHrPayroll, getHrEmployees, getHrPayroll, getHrSchedules, updateHrPayroll } from '../../services/data'
 import {
   HR_PAY_METHODS,
@@ -143,6 +159,24 @@ import {
 const employees = ref([])
 const schedules = ref([])
 const payroll = ref([])
+const { from, to } = useReportPeriod()
+const visiblePayroll = computed(() =>
+  payroll.value.filter((p) => overlapsDateRange(p.period_start, p.period_end, from.value, to.value))
+)
+const payrollExportColumns = [
+  { label: 'Employee', key: 'full_name' },
+  { label: 'Department', key: 'department' },
+  { label: 'Position', key: 'position' },
+  { label: 'Period start', key: 'period_start' },
+  { label: 'Period end', key: 'period_end' },
+  { label: 'Base', key: 'base_salary' },
+  { label: 'Overtime', key: 'overtime_pay' },
+  { label: 'Bonuses', key: 'bonuses' },
+  { label: 'Deductions', key: 'deductions' },
+  { label: 'Net', key: 'net_pay' },
+  { label: 'Status', key: 'status' },
+  { label: 'Paid date', key: 'payment_date' },
+]
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')

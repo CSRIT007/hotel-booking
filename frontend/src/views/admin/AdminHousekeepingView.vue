@@ -76,6 +76,15 @@
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
           <p class="text-sm font-medium text-stone-700">{{ boardTitle }}</p>
+          <div class="flex flex-wrap items-center gap-2">
+          <ReportExportButton
+            report-id="housekeeping"
+            :from="boardDate"
+            :to="boardDate"
+            :rows="filteredRooms"
+            :columns="housekeepingExportColumns"
+            :disabled="loading"
+          />
           <select v-model="boardFilter" class="rounded-md border border-stone-300 px-2 py-1 text-xs">
             <option value="today">Today</option>
             <option value="to_clean">To clean</option>
@@ -89,6 +98,7 @@
             <option value="out_of_order">Out of order</option>
             <option value="all">All rooms</option>
           </select>
+          </div>
         </div>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-stone-200 text-sm">
@@ -178,6 +188,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
 import { createHousekeepingTask, getHousekeeping, updateHousekeepingTask } from '../../services/data'
 import { todayKey } from '../../services/hr'
 
@@ -291,6 +302,19 @@ function taskLabel(type) {
   const map = { checkout: 'Checkout', stayover: 'Stay-over', deep_clean: 'Deep clean' }
   return map[type] || type
 }
+
+const housekeepingExportColumns = [
+  { label: 'Room', key: 'room_name' },
+  { label: 'Property', key: 'hotel_name' },
+  { label: 'Guest', key: 'today_guest' },
+  { label: 'Arrival', value: (row) => (row.arriving_today ? 'Yes' : '') },
+  { label: 'Departure', value: (row) => (row.departing_today ? 'Yes' : '') },
+  { label: 'Stay-over', value: (row) => (row.stayover_today ? 'Yes' : '') },
+  { label: 'Status', value: (row) => statusLabel(row.hk_status) },
+  { label: 'Task', value: (row) => taskLabel(row.task_type) },
+  { label: 'Due', key: 'due_date' },
+  { label: 'Assigned', key: 'assigned_name' },
+]
 
 function boardClass(status) {
   const map = {

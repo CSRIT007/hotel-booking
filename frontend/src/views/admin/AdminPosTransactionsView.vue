@@ -3,11 +3,24 @@
     <h1 class="text-2xl font-semibold text-stone-800">POS Transactions</h1>
     <p class="mt-1 text-stone-600">History of POS transactions from PostgreSQL or Tadabase.</p>
 
+    <div class="mt-4">
+      <ReportPeriodBar v-model:from="from" v-model:to="to" />
+    </div>
     <div class="mt-4 flex flex-wrap items-center gap-3 text-sm text-stone-600">
-      <span>Total: <span class="font-semibold text-stone-800">{{ transactions.length }}</span> transactions</span>
+      <span>Total: <span class="font-semibold text-stone-800">{{ visibleTransactions.length }}</span> transactions</span>
       <span>Paid: <span class="font-semibold text-green-700">{{ statusCounts.paid }}</span></span>
       <span>Pending: <span class="font-semibold text-amber-700">{{ statusCounts.pending }}</span></span>
       <span>Refunded: <span class="font-semibold text-sky-700">{{ statusCounts.refunded }}</span></span>
+      <ReportExportButton
+        class="ml-auto"
+        report-id="pos-transactions"
+        filename="pos-transactions"
+        :from="from"
+        :to="to"
+        :rows="visibleTransactions"
+        :columns="posExportColumns"
+        :disabled="loading"
+      />
     </div>
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
@@ -26,7 +39,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
-            <tr v-for="t in transactions" :key="t.id" class="hover:bg-stone-50">
+            <tr v-for="t in visibleTransactions" :key="t.id" class="hover:bg-stone-50">
               <td class="px-4 py-3 text-stone-500">#{{ t.id }}</td>
               <td class="px-4 py-3 font-medium text-stone-800">
                 {{ t.product_name || t.product_name_text || ('Product #' + (t.product_id || t.product)) }}
@@ -48,8 +61,8 @@
           </tbody>
         </table>
       </div>
-      <p v-if="transactions.length === 0 && !loading" class="p-4 text-center text-stone-500">
-        No POS transactions yet. Use the POS system to record sales.
+      <p v-if="visibleTransactions.length === 0 && !loading" class="p-4 text-center text-stone-500">
+        No POS transactions in this period.
       </p>
       <p v-if="loading" class="p-4 text-center text-stone-500">Loading…</p>
     </div>
@@ -58,15 +71,34 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import ReportExportButton from '../../components/ReportExportButton.vue'
+import ReportPeriodBar from '../../components/ReportPeriodBar.vue'
+import { useReportPeriod } from '../../composables/useReportPeriod'
 import { getPosTransactions } from '../../services/data'
+import { filterByDateRange, posFinanceDate } from '../../services/finance'
 import { formatMoney } from '../../utils/money'
+
+const posExportColumns = [
+  { label: 'ID', key: 'id' },
+  { label: 'Product', value: (row) => row.product_name || row.product_name_text || row.product_id },
+  { label: 'Category', key: 'category' },
+  { label: 'Quantity', key: 'quantity' },
+  { label: 'Total', key: 'total_amount' },
+  { label: 'Payment', key: 'payment_method' },
+  { label: 'Status', key: 'status' },
+  { label: 'Date', value: (row) => row.created_at || row.transaction_date },
+]
 
 const transactions = ref([])
 const loading = ref(true)
+const { from, to } = useReportPeriod()
+const visibleTransactions = computed(() =>
+  filterByDateRange(transactions.value, from.value, to.value, posFinanceDate)
+)
 
 const statusCounts = computed(() => {
   const c = { paid: 0, pending: 0, refunded: 0 }
-  transactions.value.forEach((t) => {
+  visibleTransactions.value.forEach((t) => {
     const s = (t.status || 'paid').toLowerCase()
     if (c[s] !== undefined) c[s]++
   })
