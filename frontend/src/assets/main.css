@@ -128,6 +128,12 @@
 html.dark .bg-white {
   background-color: rgb(28 25 23);
 }
+html.dark .bg-white\/80 {
+  background-color: rgb(41 37 36 / 0.88);
+}
+html.dark .hover\:bg-white:hover {
+  background-color: rgb(68 64 60);
+}
 html.dark .bg-warm-50,
 html.dark .bg-warm-50\/95 {
   background-color: rgb(12 10 9);

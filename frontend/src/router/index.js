@@ -62,7 +62,7 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const title = to.meta.title ?? (to.matched[to.matched.length - 1]?.meta?.title)
   document.title = title ? `${title} — Smile Hotel MS` : 'Smile Hotel MS'
-  const { isLoggedIn, isStaff } = useAuth()
+  const { isLoggedIn, isStaff, canAccess } = useAuth()
   if (to.meta.guestOnly && isLoggedIn.value) {
     next({ name: 'Home' })
     return
@@ -75,13 +75,17 @@ router.beforeEach((to, _from, next) => {
     next({ name: 'Login', query: { redirect: to.fullPath } })
     return
   }
-  if (to.meta.requiresStaff) {
+  if (to.matched.some((r) => r.meta.requiresStaff)) {
     if (!isLoggedIn.value) {
       next({ name: 'AdminLogin', query: { redirect: to.fullPath } })
       return
     }
     if (!isStaff.value) {
       next({ name: 'Home' })
+      return
+    }
+    if (!canAccess(to.path)) {
+      next({ name: 'AdminDashboard' })
       return
     }
   }

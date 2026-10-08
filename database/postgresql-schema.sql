@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'guest' CHECK (role IN ('guest', 'staff')),
+    role VARCHAR(20) DEFAULT 'guest' CHECK (role IN ('guest', 'staff', 'receptionist', 'manager', 'owner')),
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     failed_login_count INT DEFAULT 0,
     locked_until TIMESTAMPTZ,
@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+CREATE TABLE IF NOT EXISTS guest_profiles (
+    user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    full_name VARCHAR(100),
+    phone VARCHAR(30),
+    id_type VARCHAR(20),
+    id_number VARCHAR(80),
+    loyalty_points INT NOT NULL DEFAULT 0,
+    vip_status VARCHAR(20) NOT NULL DEFAULT 'regular' CHECK (vip_status IN ('regular', 'silver', 'gold', 'platinum')),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Hotels
 CREATE TABLE IF NOT EXISTS hotels (
@@ -49,6 +61,8 @@ CREATE TABLE IF NOT EXISTS rooms (
     view_type VARCHAR(50),
     beds INT NOT NULL DEFAULT 1,
     image VARCHAR(255),
+    -- Inventory hold: available | booked | maintenance (out of order).
+    -- Live ops status (clean / dirty / occupied / out_of_order) is derived by the API.
     status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'booked', 'maintenance')),
     images JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP

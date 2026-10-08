@@ -54,6 +54,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthApi } from '../services/auth'
+import { isHotelStaff } from '../utils/roles'
 
 const router = useRouter()
 const route = useRoute()
@@ -73,7 +74,7 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await login(loginId.value, password.value)
-    if (res?.user?.role === 'staff') {
+    if (isHotelStaff(res?.user?.role)) {
       router.push({ name: 'AdminDashboard' })
     } else {
       router.push(route.query.redirect || { name: 'Home' })

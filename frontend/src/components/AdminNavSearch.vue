@@ -45,6 +45,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuth } from '../composables/useAuth'
 
 const PAGES = [
   { to: '/admin', label: 'Dashboard', group: 'Home', keys: 'home summary' },
@@ -84,6 +85,7 @@ const PAGES = [
 ]
 
 const router = useRouter()
+const { canAccess } = useAuth()
 const query = ref('')
 const open = ref(false)
 const activeIndex = ref(0)
@@ -95,6 +97,7 @@ const matches = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return []
   return PAGES.filter((item) => {
+    if (!canAccess(item.to)) return false
     const hay = `${item.label} ${item.group} ${item.keys}`.toLowerCase()
     return hay.includes(q)
   }).slice(0, 8)

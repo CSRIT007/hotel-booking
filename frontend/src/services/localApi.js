@@ -102,6 +102,15 @@ export async function updateRoom(id, payload) {
   }
 }
 
+export async function setRoomOps(id, action) {
+  try {
+    const { data } = await client.post(`/api/rooms/${id}/ops`, { action })
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update room status')
+  }
+}
+
 export async function deleteRoom(id) {
   try {
     const { data } = await client.delete(`/api/rooms/${id}`)
@@ -226,6 +235,42 @@ export async function updateContactStatus(id, status) {
 export async function getUsers(params = {}) {
   const { data } = await client.get('/api/users', { params })
   return Array.isArray(data) ? data : []
+}
+
+export async function getGuests(params = {}) {
+  try {
+    const { data } = await client.get('/api/guests', { params })
+    return Array.isArray(data) ? data : []
+  } catch (e) {
+    throwApiError(e, 'Failed to load guests')
+  }
+}
+
+export async function getGuest(id) {
+  try {
+    const { data } = await client.get(`/api/guests/${id}`)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to load guest')
+  }
+}
+
+export async function createGuest(payload) {
+  try {
+    const { data } = await client.post('/api/guests', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add guest')
+  }
+}
+
+export async function updateGuest(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/guests/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update guest')
+  }
 }
 
 export async function createUser(payload) {

@@ -144,8 +144,8 @@
           <div>
             <label class="block text-xs font-medium text-stone-700">Room assigned</label>
             <select v-model.number="checkInForm.room_id" class="field">
-              <option v-for="r in bookableRooms" :key="r.id" :value="r.id">
-                {{ r.name }} — {{ r.hotel_name }}
+              <option v-for="r in rooms" :key="r.id" :value="r.id" :disabled="!canCheckInTo(r)">
+                {{ r.name }} — {{ r.hotel_name }} ({{ opsStatusLabel(r.ops_status) }})
               </option>
             </select>
           </div>
@@ -453,6 +453,7 @@ import {
 } from '../../services/data'
 import { folioCategoryLabel, payMethodLabel } from '../../utils/invoice'
 import { formatMoney } from '../../utils/money'
+import { opsStatusLabel } from '../../utils/rooms'
 
 const emptyForm = () => ({
   user_id: 0,
@@ -506,7 +507,10 @@ const methodSummary = computed(() => {
     .join(' · ')
 })
 const guests = computed(() => users.value.filter((u) => (u.role || '').toLowerCase() === 'guest'))
-const bookableRooms = computed(() => rooms.value.filter((r) => r.status !== 'maintenance'))
+const bookableRooms = computed(() => rooms.value.filter((r) => r.ops_status !== 'out_of_order' && r.status !== 'maintenance'))
+function canCheckInTo(r) {
+  return r.ops_status === 'clean'
+}
 const selectedRoom = computed(() => bookableRooms.value.find((r) => r.id === form.room_id))
 const guestChoices = computed(() => {
   const max = Number(selectedRoom.value?.max_persons || 4)

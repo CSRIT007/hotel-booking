@@ -3,7 +3,7 @@
     <div class="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold text-stone-800">Rooms</h1>
-        <p class="mt-1 text-stone-600">Add or remove rooms for a property. They appear on the public rooms page when available.</p>
+        <p class="mt-1 text-stone-600">Clean, dirty, occupied, or out of order. Take a vacant room out of order to stop sales.</p>
       </div>
       <router-link to="/admin/properties" class="text-sm font-medium text-brand-600 hover:underline">← Properties</router-link>
     </div>
@@ -55,11 +55,10 @@
             <input v-model="form.view_type" type="text" class="field" :disabled="saving" placeholder="City view" />
           </div>
           <div>
-            <label class="block text-xs font-medium text-stone-700">Status</label>
-            <select v-model="form.status" class="field" :disabled="saving">
-              <option value="available">Available</option>
-              <option value="booked">Booked</option>
-              <option value="maintenance">Maintenance</option>
+            <label class="block text-xs font-medium text-stone-700">Service</label>
+            <select v-model="form.ops_status" class="field" :disabled="saving">
+              <option value="in_service">In service</option>
+              <option value="out_of_order">Out of order</option>
             </select>
           </div>
           <AdminPhotoFields v-model:image="form.image" v-model:images="form.images" :stock="ROOM_IMAGES" :disabled="saving" />
@@ -104,15 +103,25 @@
                 <td class="px-4 py-3">
                   <span
                     class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                    :class="{
-                      'bg-green-100 text-green-800': r.status === 'available',
-                      'bg-amber-100 text-amber-800': r.status === 'booked',
-                      'bg-stone-100 text-stone-600': r.status === 'maintenance',
-                    }"
-                  >{{ r.status || 'available' }}</span>
+                    :class="opsStatusClass(r.ops_status)"
+                  >{{ opsStatusLabel(r.ops_status) }}</span>
                 </td>
                 <td class="px-4 py-3 text-right whitespace-nowrap">
                   <button type="button" class="mr-3 text-brand-600 hover:underline" @click="edit(r)">Edit</button>
+                  <button
+                    v-if="r.ops_status === 'out_of_order'"
+                    type="button"
+                    class="mr-3 text-green-700 hover:underline"
+                    :disabled="saving"
+                    @click="setOps(r, 'in_service')"
+                  >In service</button>
+                  <button
+                    v-else-if="r.ops_status !== 'occupied'"
+                    type="button"
+                    class="mr-3 text-stone-600 hover:underline"
+                    :disabled="saving"
+                    @click="setOps(r, 'out_of_order')"
+                  >Out of order</button>
                   <button type="button" class="text-red-600 hover:underline" @click="askRemove(r)">Remove</button>
                 </td>
               </tr>
@@ -138,11 +147,12 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { createRoom, deleteRoom, getHotels, getRooms, updateRoom } from '../../services/data'
+import { createRoom, deleteRoom, getHotels, getRooms, setRoomOps, updateRoom } from '../../services/data'
 import { ROOM_IMAGES } from '../../constants/media'
 import ConfirmModal from '../../components/ConfirmModal.vue'
 import AdminPhotoFields from '../../components/AdminPhotoFields.vue'
 import { formatMoney } from '../../utils/money'
+import { opsStatusClass, opsStatusLabel } from '../../utils/rooms'
 
 const hotels = ref([])
 const rooms = ref([])
@@ -164,7 +174,7 @@ const form = reactive({
   beds: 1,
   image: ROOM_IMAGES[0].value,
   images: [],
-  status: 'available',
+  ops_status: 'in_service',
 })
 
 function resetForm() {
@@ -179,7 +189,7 @@ function resetForm() {
   form.beds = 1
   form.image = ROOM_IMAGES[0].value
   form.images = []
-  form.status = 'available'
+  form.ops_status = 'in_service'
   formError.value = ''
 }
 
@@ -195,7 +205,7 @@ function edit(r) {
   form.beds = Number(r.beds || 1)
   form.image = r.image || ROOM_IMAGES[0].value
   form.images = Array.isArray(r.images) ? [...r.images] : []
-  form.status = r.status || 'available'
+  form.ops_status = r.ops_status === 'out_of_order' ? 'out_of_order' : 'in_service'
   formError.value = ''
   formSuccess.value = ''
 }
@@ -221,11 +231,25 @@ async function save() {
     const payload = { ...form, name: form.name.trim() }
     if (editingId.value) await updateRoom(editingId.value, payload)
     else await createRoom(payload)
-    formSuccess.value = editingId.value ? 'Room updated.' : 'Room added. Guests can book it when status is available.'
+    formSuccess.value = editingId.value ? 'Room updated.' : 'Room added. Guests can book it when it is in service.'
     resetForm()
     await load()
   } catch (e) {
     formError.value = e.message || 'Could not save room.'
+  }
+  saving.value = false
+}
+
+async function setOps(r, action) {
+  formError.value = ''
+  formSuccess.value = ''
+  saving.value = true
+  try {
+    await setRoomOps(r.id, action)
+    formSuccess.value = action === 'out_of_order' ? 'Room taken out of order.' : 'Room is back in service.'
+    await load()
+  } catch (e) {
+    formError.value = e.message || 'Could not update room status.'
   }
   saving.value = false
 }

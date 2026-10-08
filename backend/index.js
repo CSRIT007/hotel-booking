@@ -131,6 +131,118 @@ function withMedia(row) {
   return { ...row, image: ensureImagePath(row.image), images: normalizeGallery(row.images) }
 }
 
+function computeOpsStatus(roomStatus, occupied, dirty) {
+  if (roomStatus === 'maintenance') return 'out_of_order'
+  if (occupied) return 'occupied'
+  if (dirty) return 'dirty'
+  return 'clean'
+}
+
+async function loadOpsFlags() {
+  const [occ, dirty] = await Promise.all([
+    pool.query(
+      `SELECT DISTINCT room_id FROM bookings WHERE status = 'in_house'`
+    ),
+    pool.query(
+      `SELECT DISTINCT room_id FROM housekeeping_tasks WHERE status IN ('dirty', 'in_progress')`
+    ),
+  ])
+  return {
+    occupied: new Set(occ.rows.map((r) => Number(r.room_id))),
+    dirty: new Set(dirty.rows.map((r) => Number(r.room_id))),
+  }
+}
+
+function withOpsStatus(row, flags) {
+  if (!row) return row
+  const id = Number(row.id || row.room_id)
+  const occupied = flags.occupied.has(id)
+  const dirty = flags.dirty.has(id)
+  return {
+    ...row,
+    occupied,
+    dirty,
+    ops_status: computeOpsStatus(row.status || row.room_status, occupied, dirty),
+  }
+}
+
+async function attachOpsInfo(row) {
+  return withOpsStatus(row, await loadOpsFlags())
+}
+
+async function roomHasOpenHousekeeping(roomId) {
+  const r = await pool.query(
+    `SELECT 1 FROM housekeeping_tasks WHERE room_id = $1 AND status IN ('dirty', 'in_progress') LIMIT 1`,
+    [roomId]
+  )
+  return r.rows.length > 0
+}
+
+async function getRoomOps(roomId) {
+  const r = await pool.query('SELECT id, status FROM rooms WHERE id = $1', [roomId])
+  if (!r.rows[0]) return null
+  const occupied = await roomIsOccupied(roomId)
+  const dirty = await roomHasOpenHousekeeping(roomId)
+  return {
+    id: r.rows[0].id,
+    status: r.rows[0].status,
+    occupied,
+    dirty,
+    ops_status: computeOpsStatus(r.rows[0].status, occupied, dirty),
+  }
+}
+
+function requestedOpsAction(body) {
+  const v = body?.ops_action || body?.ops_status || body?.status
+  if (v === 'out_of_order' || v === 'maintenance') return 'out_of_order'
+  if (v === 'in_service' || v === 'available' || v === 'clean') return 'in_service'
+  return null
+}
+
+function createRoomDbStatus(body) {
+  if (body.ops_action || body.ops_status) {
+    return requestedOpsAction(body) === 'out_of_order' ? 'maintenance' : 'available'
+  }
+  if (['available', 'booked', 'maintenance'].includes(body.status)) return body.status
+  return 'available'
+}
+
+async function nextRoomDbStatus(body, row) {
+  const action =
+    body.ops_action || body.ops_status
+      ? requestedOpsAction(body)
+      : body.status === 'maintenance'
+        ? 'out_of_order'
+        : body.status === 'available'
+          ? 'in_service'
+          : null
+  if (action === 'out_of_order') {
+    if (await roomIsOccupied(row.id)) {
+      return { error: 'Check the guest out before taking this room out of order.' }
+    }
+    return { status: 'maintenance' }
+  }
+  if (action === 'in_service') {
+    if (row.status !== 'maintenance') return { status: row.status }
+    if (await roomHasOpenHousekeeping(row.id)) return { status: 'booked' }
+    return { status: 'available' }
+  }
+  if (body.status && ['available', 'booked', 'maintenance'].includes(body.status)) {
+    return { status: body.status }
+  }
+  return { status: row.status }
+}
+
+async function loadRoomDetails(id) {
+  const details = await pool.query(
+    'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
+    [id]
+  )
+  const row = details.rows[0]
+  if (!row) return null
+  return attachOpsInfo(withMedia(row))
+}
+
 async function ensureGalleryColumns() {
   await pool.query(`ALTER TABLE hotels ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`)
   await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`)
@@ -194,12 +306,54 @@ function actorFromReq(req, fallback = {}) {
   return { id, name, role, ip: clientIp(req), userAgent: clientUserAgent(req) }
 }
 
+const STAFF_ROLES = ['staff', 'owner', 'manager', 'receptionist']
+const OWNER_ROLES = ['staff', 'owner']
+
+function staffLevel(role) {
+  const r = String(role || '').toLowerCase()
+  if (r === 'owner' || r === 'staff') return 3
+  if (r === 'manager') return 2
+  if (r === 'receptionist') return 1
+  return 0
+}
+
+function isHotelStaff(role) {
+  return STAFF_ROLES.includes(String(role || '').toLowerCase())
+}
+
+function requestRole(req) {
+  return String(req.get('x-user-role') || '')
+}
+
 function requireStaff(req, res) {
-  if (String(req.get('x-user-role') || '') !== 'staff') {
+  if (!isHotelStaff(requestRole(req))) {
     res.status(403).json({ error: 'Staff access required.' })
     return false
   }
   return true
+}
+
+function requireManager(req, res) {
+  if (staffLevel(requestRole(req)) < 2) {
+    res.status(403).json({ error: 'Manager access required.' })
+    return false
+  }
+  return true
+}
+
+function requireOwner(req, res) {
+  if (staffLevel(requestRole(req)) < 3) {
+    res.status(403).json({ error: 'Owner access required.' })
+    return false
+  }
+  return true
+}
+
+function normalizeUserRole(role) {
+  const r = String(role || '').toLowerCase()
+  if (r === 'staff') return 'owner'
+  if (['guest', 'receptionist', 'manager', 'owner'].includes(r)) return r
+  return null
 }
 
 const PASSWORD_MIN = 8
@@ -316,7 +470,8 @@ app.post('/api/auth/login', async (req, res) => {
       summary: `${user.username} signed in`,
       actor: { id: user.id, name: user.username, role: user.role || 'guest', ip: actorFromReq(req).ip },
     })
-    res.json({ user: { id: user.id, username: user.username, email: user.email, role: user.role || 'guest' } })
+    const loginRole = user.role === 'staff' ? 'owner' : user.role || 'guest'
+    res.json({ user: { id: user.id, username: user.username, email: user.email, role: loginRole } })
   } catch (e) {
     console.error('Login error:', e.message)
     const isDbError = e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' || e.code === '42P01' || e.code === '28P01'
@@ -422,6 +577,8 @@ app.get('/api/rooms', async (req, res) => {
     let rows = await Promise.all(
       r.rows.map((row) => attachSellInfo(withMedia(row), hasStay ? checkIn : null, hasStay ? checkOut : null))
     )
+    const flags = await loadOpsFlags()
+    rows = rows.map((row) => withOpsStatus(row, flags))
     const includeUnavailable = req.query.include_unavailable === '1' || req.query.include_unavailable === 'true'
     if (hasStay && !includeUnavailable) {
       rows = rows.filter((row) => row.available)
@@ -443,7 +600,8 @@ app.get('/api/rooms/:id', async (req, res) => {
     const checkIn = req.query.check_in
     const checkOut = req.query.check_out
     const hasStay = checkIn && checkOut && String(checkOut) > String(checkIn)
-    res.json(await attachSellInfo(withMedia(row), hasStay ? checkIn : null, hasStay ? checkOut : null))
+    const priced = await attachSellInfo(withMedia(row), hasStay ? checkIn : null, hasStay ? checkOut : null)
+    res.json(await attachOpsInfo(priced))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -518,13 +676,13 @@ app.delete('/api/hotels/:id', async (req, res) => {
 
 app.post('/api/rooms', async (req, res) => {
   try {
-    const { hotel_id, name, description, price, max_persons, size, view_type, beds, image, images, status } = req.body || {}
+    const { hotel_id, name, description, price, max_persons, size, view_type, beds, image, images } = req.body || {}
     if (!hotel_id) return res.status(400).json({ error: 'Select a property first.' })
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'Room name is required.' })
     if (price == null || Number(price) < 0) return res.status(400).json({ error: 'Price is required.' })
     const hotel = await pool.query('SELECT id FROM hotels WHERE id = $1', [hotel_id])
     if (!hotel.rows[0]) return res.status(400).json({ error: 'Property not found. Add a property first.' })
-    const roomStatus = ['available', 'booked', 'maintenance'].includes(status) ? status : 'available'
+    const roomStatus = createRoomDbStatus(req.body || {})
     const gallery = JSON.stringify(normalizeGallery(images))
     const r = await pool.query(
       `INSERT INTO rooms (hotel_id, name, description, price, max_persons, size, view_type, beds, image, status, images)
@@ -543,18 +701,14 @@ app.post('/api/rooms', async (req, res) => {
         gallery,
       ]
     )
-    const details = await pool.query(
-      'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
-      [r.rows[0].id]
-    )
-    const created = details.rows[0]
+    const created = await loadRoomDetails(r.rows[0].id)
     await writeAudit(req, {
       action: 'create',
       entity: 'room',
       entityId: created.id,
       summary: `Added room “${created.name}” at ${created.hotel_name}`,
     })
-    res.status(201).json(withMedia(created))
+    res.status(201).json(created)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -571,7 +725,9 @@ app.patch('/api/rooms/:id', async (req, res) => {
     if (!hotel.rows[0]) return res.status(400).json({ error: 'Property not found.' })
     const nextName = body.name != null ? String(body.name).trim() : row.name
     if (!nextName) return res.status(400).json({ error: 'Room name is required.' })
-    const nextStatus = body.status && ['available', 'booked', 'maintenance'].includes(body.status) ? body.status : row.status
+    const nextHold = await nextRoomDbStatus(body, row)
+    if (nextHold.error) return res.status(400).json({ error: nextHold.error })
+    const nextStatus = nextHold.status
     const nextImages = body.images != null ? JSON.stringify(normalizeGallery(body.images)) : JSON.stringify(normalizeGallery(row.images))
     const r = await pool.query(
       `UPDATE rooms
@@ -593,18 +749,49 @@ app.patch('/api/rooms/:id', async (req, res) => {
         req.params.id,
       ]
     )
-    const details = await pool.query(
-      'SELECT r.*, h.name AS hotel_name FROM rooms r JOIN hotels h ON r.hotel_id = h.id WHERE r.id = $1',
-      [r.rows[0].id]
-    )
-    const updated = details.rows[0]
+    if (row.status === 'maintenance' && nextStatus !== 'maintenance') {
+      await syncRoomHold(row.id)
+    }
+    const updated = await loadRoomDetails(r.rows[0].id)
     await writeAudit(req, {
       action: 'update',
       entity: 'room',
       entityId: updated.id,
-      summary: `Updated room “${updated.name}” (${updated.status})`,
+      summary: `Updated room “${updated.name}” (${updated.ops_status})`,
     })
-    res.json(withMedia(updated))
+    res.json(updated)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/rooms/:id/ops', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query('SELECT * FROM rooms WHERE id = $1', [req.params.id])
+    const row = current.rows[0]
+    if (!row) return res.status(404).json({ error: 'Room not found' })
+    const action = req.body?.action
+    if (!['out_of_order', 'in_service'].includes(action)) {
+      return res.status(400).json({ error: 'Use out of order or in service.' })
+    }
+    const nextHold = await nextRoomDbStatus({ ops_action: action }, row)
+    if (nextHold.error) return res.status(400).json({ error: nextHold.error })
+    await pool.query('UPDATE rooms SET status = $1 WHERE id = $2', [nextHold.status, row.id])
+    if (row.status === 'maintenance' && nextHold.status !== 'maintenance') {
+      await syncRoomHold(row.id)
+    }
+    const updated = await loadRoomDetails(row.id)
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'room',
+      entityId: updated.id,
+      summary:
+        action === 'out_of_order'
+          ? `Room “${updated.name}” taken out of order`
+          : `Room “${updated.name}” put back in service`,
+    })
+    res.json(updated)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -666,7 +853,9 @@ app.get('/api/bookings', async (req, res) => {
         r.name AS room_name, r.price AS room_price,
         h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code,
         (SELECT COALESCE(SUM(CASE WHEN f.kind = 'charge' THEN f.amount ELSE -f.amount END), 0)
-         FROM booking_folio f WHERE f.booking_id = b.id) AS folio_balance
+         FROM booking_folio f WHERE f.booking_id = b.id) AS folio_balance,
+        (SELECT COALESCE(SUM(f.amount), 0)
+         FROM booking_folio f WHERE f.booking_id = b.id AND f.kind = 'payment') AS folio_payments
        FROM bookings b
        JOIN users u ON b.user_id = u.id
        JOIN rooms r ON b.room_id = r.id
@@ -772,7 +961,7 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const isStaff = String(req.get('x-user-role') || '') === 'staff'
+    const isStaff = isHotelStaff(requestRole(req))
     const { user_id, room_id, check_in, check_out, guests, status, channel_id, walk_in_name, walk_in_email } = req.body || {}
     if (!room_id || !check_in || !check_out) {
       return res.status(400).json({ error: 'Missing required booking fields.' })
@@ -873,6 +1062,18 @@ app.post('/api/bookings/:id/check-in', async (req, res) => {
       })
     }
 
+    const ops = await getRoomOps(nextRoomId)
+    if (!ops) return res.status(400).json({ error: 'Room not found.' })
+    if (ops.ops_status === 'out_of_order') {
+      return res.status(400).json({ error: 'This room is out of order.' })
+    }
+    if (ops.ops_status === 'dirty') {
+      return res.status(400).json({ error: 'This room is dirty. Clean it first or assign another room.' })
+    }
+    if (ops.ops_status === 'occupied') {
+      return res.status(400).json({ error: 'That room is already occupied.' })
+    }
+
     let booking
     if (Number(nextRoomId) !== Number(current.room_id)) {
       const locked = await withRoomLock(nextRoomId, async (db) => {
@@ -907,6 +1108,12 @@ app.post('/api/bookings/:id/check-in', async (req, res) => {
     }
     if (Number(nextRoomId) !== Number(current.room_id)) await syncRoomHold(current.room_id)
     await syncRoomHold(booking.room_id)
+    const guestUser = await pool.query('SELECT username FROM users WHERE id = $1', [booking.user_id])
+    await syncGuestIdentity(booking.user_id, {
+      id_type: idType,
+      id_number: idNumber,
+      full_name: guestUser.rows[0]?.username,
+    })
     await writeAudit(req, {
       action: 'check_in',
       entity: 'booking',
@@ -1050,7 +1257,7 @@ app.get('/api/bookings/:id/invoice', async (req, res) => {
     const currentQ = await pool.query('SELECT id, user_id, status FROM bookings WHERE id = $1', [req.params.id])
     const current = currentQ.rows[0]
     if (!current) return res.status(404).json({ error: 'Booking not found' })
-    const isStaff = String(req.get('x-user-role') || '') === 'staff'
+    const isStaff = isHotelStaff(requestRole(req))
     const actor = parseInt(req.get('x-user-id') || 0, 10)
     if (!isStaff && actor !== Number(current.user_id)) {
       return res.status(403).json({ error: 'You can only view your own invoice.' })
@@ -1086,27 +1293,31 @@ app.get('/api/services', async (_req, res) => {
 app.get('/api/users', async (req, res) => {
   if (!requireStaff(req, res)) return
   try {
-    const role = req.query.role
+    let role = req.query.role
+    if (staffLevel(requestRole(req)) < 2) role = 'guest'
     let query = `SELECT id, username, email, role, created_at,
                         COALESCE(status, 'active') AS status,
                         COALESCE(failed_login_count, 0) AS failed_login_count,
                         locked_until, last_login_at
                  FROM users WHERE 1=1`
     const params = []
-    if (role) {
+    if (role === 'staff') {
+      query += ` AND role = ANY($${params.length + 1}::text[])`
+      params.push(STAFF_ROLES)
+    } else if (role) {
       params.push(role)
       query += ` AND role = $${params.length}`
     }
     query += ' ORDER BY id'
     const r = await pool.query(query, params)
-    res.json(r.rows)
+    res.json(r.rows.map((row) => ({ ...row, role: row.role === 'staff' ? 'owner' : row.role })))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
 })
 
 app.post('/api/users', async (req, res) => {
-  if (!requireStaff(req, res)) return
+  if (!requireOwner(req, res)) return
   try {
     const { username, email, password, role } = req.body || {}
     if (!username || !email || !password) {
@@ -1115,7 +1326,7 @@ app.post('/api/users', async (req, res) => {
     if (!isPasswordStrong(password)) {
       return res.status(400).json({ error: `Password must be at least ${PASSWORD_MIN} characters.` })
     }
-    const nextRole = role === 'staff' ? 'staff' : 'guest'
+    const nextRole = normalizeUserRole(role) || 'guest'
     const exist = await pool.query('SELECT id FROM users WHERE email = $1 OR username = $2 LIMIT 1', [email, username])
     if (exist.rows.length) return res.status(400).json({ error: 'Username or email already exists.' })
     const hash = await bcrypt.hash(password, 10)
@@ -1139,7 +1350,7 @@ app.post('/api/users', async (req, res) => {
 })
 
 app.patch('/api/users/:id', async (req, res) => {
-  if (!requireStaff(req, res)) return
+  if (!requireOwner(req, res)) return
   try {
     const id = parseInt(req.params.id, 10)
     const actorId = parseInt(req.get('x-user-id') || '0', 10)
@@ -1150,24 +1361,24 @@ app.patch('/api/users/:id', async (req, res) => {
     )
     if (!current.rows[0]) return res.status(404).json({ error: 'User not found' })
     const row = current.rows[0]
-    const nextRole = req.body?.role != null ? req.body.role : row.role
+    const nextRole = req.body?.role != null ? normalizeUserRole(req.body.role) : normalizeUserRole(row.role)
     const nextStatus = req.body?.status != null ? req.body.status : row.status
-    if (!['guest', 'staff'].includes(nextRole)) return res.status(400).json({ error: 'Role must be guest or staff.' })
+    if (!nextRole) return res.status(400).json({ error: 'Role must be receptionist, manager, owner, or guest.' })
     if (!['active', 'disabled'].includes(nextStatus)) return res.status(400).json({ error: 'Status must be active or disabled.' })
     if (actorId && actorId === id && nextStatus === 'disabled') {
       return res.status(400).json({ error: 'You cannot disable your own account.' })
     }
-    if (actorId && actorId === id && nextRole !== 'staff') {
-      return res.status(400).json({ error: 'You cannot remove your own staff access.' })
+    if (actorId && actorId === id && staffLevel(nextRole) < 3) {
+      return res.status(400).json({ error: 'You cannot remove your own owner access.' })
     }
-    if (row.role === 'staff' && (nextRole !== 'staff' || nextStatus === 'disabled')) {
+    if (OWNER_ROLES.includes(row.role) && (staffLevel(nextRole) < 3 || nextStatus === 'disabled')) {
       const staffLeft = await pool.query(
         `SELECT COUNT(*) AS count FROM users
-         WHERE role = 'staff' AND COALESCE(status, 'active') = 'active' AND id <> $1`,
-        [id]
+         WHERE role = ANY($2::text[]) AND COALESCE(status, 'active') = 'active' AND id <> $1`,
+        [id, OWNER_ROLES]
       )
       if (parseInt(staffLeft.rows[0].count, 10) < 1) {
-        return res.status(400).json({ error: 'Keep at least one active staff account.' })
+        return res.status(400).json({ error: 'Keep at least one active owner account.' })
       }
     }
     const updated = await pool.query(
@@ -1188,7 +1399,7 @@ app.patch('/api/users/:id', async (req, res) => {
 })
 
 app.post('/api/users/:id/unlock', async (req, res) => {
-  if (!requireStaff(req, res)) return
+  if (!requireOwner(req, res)) return
   try {
     const updated = await pool.query(
       `UPDATE users SET failed_login_count = 0, locked_until = NULL, status = COALESCE(status, 'active')
@@ -1210,7 +1421,7 @@ app.post('/api/users/:id/unlock', async (req, res) => {
 })
 
 app.post('/api/users/:id/password', async (req, res) => {
-  if (!requireStaff(req, res)) return
+  if (!requireOwner(req, res)) return
   try {
     const password = req.body?.password
     if (!isPasswordStrong(password)) {
@@ -1232,13 +1443,168 @@ app.post('/api/users/:id/password', async (req, res) => {
   }
 })
 
-app.get('/api/security/summary', async (req, res) => {
+app.get('/api/guests', async (req, res) => {
   if (!requireStaff(req, res)) return
+  try {
+    await pool.query(
+      `INSERT INTO guest_profiles (user_id)
+       SELECT id FROM users WHERE role = 'guest'
+       ON CONFLICT (user_id) DO NOTHING`
+    )
+    const q = String(req.query.q || '').trim()
+    const params = []
+    let where = `WHERE u.role = 'guest'`
+    if (q) {
+      params.push(`%${q}%`)
+      where += ` AND (
+        u.username ILIKE $1 OR u.email ILIKE $1
+        OR COALESCE(p.full_name, '') ILIKE $1
+        OR COALESCE(p.phone, '') ILIKE $1
+        OR COALESCE(p.id_number, '') ILIKE $1
+      )`
+    }
+    const r = await pool.query(
+      `SELECT u.id, u.username, u.email, to_char(u.created_at, 'YYYY-MM-DD') AS created_at,
+              COALESCE(NULLIF(p.full_name, ''), u.username) AS full_name,
+              p.phone, p.id_type, p.id_number, p.notes, p.vip_status, p.loyalty_points,
+              COUNT(b.id)::int AS stays,
+              COUNT(b.id) FILTER (WHERE b.status IN ('confirmed', 'in_house', 'completed'))::int AS stayed,
+              MAX(b.check_in) FILTER (WHERE b.status IN ('confirmed', 'in_house', 'completed')) AS last_stay
+       FROM users u
+       LEFT JOIN guest_profiles p ON p.user_id = u.id
+       LEFT JOIN bookings b ON b.user_id = u.id
+       ${where}
+       GROUP BY u.id, u.username, u.email, u.created_at, p.full_name, p.phone, p.id_type, p.id_number, p.notes, p.vip_status, p.loyalty_points
+       ORDER BY COALESCE(MAX(b.created_at), u.created_at) DESC, u.username`,
+      params
+    )
+    res.json(r.rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/guests/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    await ensureGuestProfile(req.params.id)
+    const guest = await pool.query(
+      `SELECT u.id, u.username, u.email, to_char(u.created_at, 'YYYY-MM-DD') AS created_at,
+              COALESCE(NULLIF(p.full_name, ''), u.username) AS full_name,
+              p.phone, p.id_type, p.id_number, p.notes, p.vip_status, p.loyalty_points
+       FROM users u
+       LEFT JOIN guest_profiles p ON p.user_id = u.id
+       WHERE u.id = $1 AND u.role = 'guest'`,
+      [req.params.id]
+    )
+    if (!guest.rows[0]) return res.status(404).json({ error: 'Guest not found.' })
+    const stays = await pool.query(
+      `SELECT b.id, b.status, b.guests, b.total_price, b.guest_id_type, b.guest_id_number,
+              to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
+              to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
+              r.name AS room_name, h.name AS hotel_name,
+              (SELECT COALESCE(SUM(f.amount), 0) FROM booking_folio f WHERE f.booking_id = b.id AND f.kind = 'payment') AS folio_payments
+       FROM bookings b
+       JOIN rooms r ON r.id = b.room_id
+       JOIN hotels h ON h.id = r.hotel_id
+       WHERE b.user_id = $1
+       ORDER BY b.check_in DESC, b.id DESC`,
+      [req.params.id]
+    )
+    res.json({ ...guest.rows[0], stays: stays.rows })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/guests', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const body = req.body || {}
+    const fullName = String(body.full_name || body.username || '').trim()
+    if (!fullName) return res.status(400).json({ error: 'Guest name is required.' })
+    const email = String(body.email || '').trim().toLowerCase()
+    const phone = String(body.phone || '').trim()
+    const walkIn = await findOrCreateWalkIn(fullName, email)
+    if (walkIn.error) return res.status(400).json({ error: walkIn.error })
+    await syncGuestIdentity(walkIn.userId, {
+      full_name: fullName,
+      phone,
+      id_type: ID_TYPES.includes(body.id_type) ? body.id_type : null,
+      id_number: String(body.id_number || '').trim(),
+      notes: body.notes != null ? String(body.notes) : undefined,
+    })
+    const created = await pool.query(
+      `SELECT u.id, u.username, u.email,
+              COALESCE(NULLIF(p.full_name, ''), u.username) AS full_name,
+              p.phone, p.id_type, p.id_number, p.notes
+       FROM users u LEFT JOIN guest_profiles p ON p.user_id = u.id
+       WHERE u.id = $1`,
+      [walkIn.userId]
+    )
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'guest',
+      entityId: walkIn.userId,
+      summary: `Added guest “${fullName}”`,
+    })
+    res.status(201).json(created.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.patch('/api/guests/:id', async (req, res) => {
+  if (!requireStaff(req, res)) return
+  try {
+    const current = await pool.query(`SELECT id, username, role FROM users WHERE id = $1`, [req.params.id])
+    if (!current.rows[0] || current.rows[0].role !== 'guest') {
+      return res.status(404).json({ error: 'Guest not found.' })
+    }
+    await ensureGuestProfile(req.params.id)
+    const body = req.body || {}
+    await syncGuestIdentity(req.params.id, {
+      full_name: body.full_name != null ? String(body.full_name).trim() : undefined,
+      phone: body.phone != null ? String(body.phone).trim() : undefined,
+      id_type: body.id_type != null ? body.id_type : undefined,
+      id_number: body.id_number != null ? String(body.id_number).trim() : undefined,
+      notes: body.notes != null ? String(body.notes) : undefined,
+    })
+    if (body.email != null) {
+      const email = String(body.email).trim().toLowerCase()
+      if (email) {
+        const taken = await pool.query('SELECT id FROM users WHERE email = $1 AND id <> $2', [email, req.params.id])
+        if (taken.rows[0]) return res.status(400).json({ error: 'That email is already used.' })
+        await pool.query('UPDATE users SET email = $1 WHERE id = $2', [email, req.params.id])
+      }
+    }
+    const updated = await pool.query(
+      `SELECT u.id, u.username, u.email,
+              COALESCE(NULLIF(p.full_name, ''), u.username) AS full_name,
+              p.phone, p.id_type, p.id_number, p.notes, p.vip_status, p.loyalty_points
+       FROM users u LEFT JOIN guest_profiles p ON p.user_id = u.id
+       WHERE u.id = $1`,
+      [req.params.id]
+    )
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'guest',
+      entityId: req.params.id,
+      summary: `Updated guest “${updated.rows[0].full_name}”`,
+    })
+    res.json(updated.rows[0])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.get('/api/security/summary', async (req, res) => {
+  if (!requireOwner(req, res)) return
   try {
     const [counts, locked, failed] = await Promise.all([
       pool.query(
         `SELECT
-           COUNT(*) FILTER (WHERE role = 'staff') AS staff,
+           COUNT(*) FILTER (WHERE role IN ('staff', 'owner', 'manager', 'receptionist')) AS staff,
            COUNT(*) FILTER (WHERE role = 'guest') AS guests,
            COUNT(*) FILTER (WHERE COALESCE(status, 'active') = 'disabled') AS disabled,
            COUNT(*) FILTER (WHERE locked_until IS NOT NULL AND locked_until > NOW()) AS locked
@@ -1546,7 +1912,8 @@ function mapExpense(row) {
   return { ...row, amount: toMoney(row.amount) }
 }
 
-app.get('/api/expenses', async (_req, res) => {
+app.get('/api/expenses', async (req, res) => {
+  if (!requireManager(req, res)) return
   try {
     const r = await pool.query(
       `SELECT id, description, category, amount,
@@ -1562,6 +1929,7 @@ app.get('/api/expenses', async (_req, res) => {
 })
 
 app.post('/api/expenses', async (req, res) => {
+  if (!requireManager(req, res)) return
   try {
     const { description, category, amount, expense_date, payment_method } = req.body || {}
     const desc = String(description || '').trim()
@@ -1594,6 +1962,7 @@ app.post('/api/expenses', async (req, res) => {
 })
 
 app.delete('/api/expenses/:id', async (req, res) => {
+  if (!requireManager(req, res)) return
   try {
     const current = await pool.query('SELECT id, description, amount, payroll_id FROM expenses WHERE id = $1', [req.params.id])
     if (!current.rows[0]) return res.status(404).json({ error: 'Expense not found' })
@@ -1614,16 +1983,23 @@ app.delete('/api/expenses/:id', async (req, res) => {
   }
 })
 
-app.get('/api/finance/summary', async (_req, res) => {
+app.get('/api/finance/summary', async (req, res) => {
+  if (!requireManager(req, res)) return
   try {
-    const [bookings, pos, expenses] = await Promise.all([
+    const [bookings, pos, expenses, folio] = await Promise.all([
       pool.query(`SELECT status, COALESCE(SUM(total_price), 0) AS total, COUNT(*)::int AS count FROM bookings GROUP BY status`),
       pool.query(`SELECT status, COALESCE(SUM(total_amount), 0) AS total, COUNT(*)::int AS count FROM pos_transactions GROUP BY status`),
       pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*)::int AS count FROM expenses`),
+      pool.query(
+        `SELECT COALESCE(SUM(f.amount), 0) AS total
+         FROM booking_folio f
+         JOIN bookings b ON b.id = f.booking_id
+         WHERE f.kind = 'payment' AND b.status IN ('confirmed', 'in_house', 'completed')`
+      ),
     ])
     const bookingByStatus = Object.fromEntries(bookings.rows.map((row) => [row.status, { total: toMoney(row.total), count: row.count }]))
     const posByStatus = Object.fromEntries(pos.rows.map((row) => [row.status, { total: toMoney(row.total), count: row.count }]))
-    const roomRevenue = toMoney(bookingByStatus.confirmed?.total) + toMoney(bookingByStatus.completed?.total)
+    const roomRevenue = toMoney(folio.rows[0]?.total)
     const posRevenue = toMoney(posByStatus.paid?.total)
     const revenue = roomRevenue + posRevenue
     const expenseTotal = toMoney(expenses.rows[0]?.total)
@@ -1669,6 +2045,11 @@ async function ensureUserSecurity() {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INT DEFAULT 0`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`)
+  await pool.query(
+    `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('guest', 'staff', 'receptionist', 'manager', 'owner'))`
+  )
+  await pool.query(`UPDATE users SET role = 'owner' WHERE role = 'staff'`)
 }
 
 async function ensureAuditTable() {
@@ -2495,7 +2876,6 @@ async function roomIsOccupied(roomId) {
   const r = await pool.query(
     `SELECT 1 FROM bookings
      WHERE room_id = $1 AND status = 'in_house'
-       AND check_in <= CURRENT_DATE AND check_out > CURRENT_DATE
      LIMIT 1`,
     [roomId]
   )
@@ -2580,11 +2960,46 @@ async function ensureHousekeepingTables() {
 }
 
 function housekeepingBoardStatus(row) {
-  if (row.room_status === 'maintenance') return 'maintenance'
+  if (row.room_status === 'maintenance') return 'out_of_order'
   if (row.task_status === 'in_progress') return 'cleaning'
   if (row.task_status === 'dirty') return 'dirty'
   if (row.stay_booking_id) return 'occupied'
-  return 'ready'
+  return 'clean'
+}
+
+function housekeepingOpsStatus(row) {
+  if (row.room_status === 'maintenance') return 'out_of_order'
+  if (row.stay_booking_id) return 'occupied'
+  if (row.task_status === 'dirty' || row.task_status === 'in_progress') return 'dirty'
+  return 'clean'
+}
+
+function withHousekeepingToday(row) {
+  const hk_status = housekeepingBoardStatus(row)
+  const arriving_today = Boolean(row.arrival_booking_id)
+  const departing_today = Boolean(row.stay_booking_id) && row.stay_check_out === row.today_date
+  const stayover_today = Boolean(row.stay_booking_id) && row.stay_check_out > row.today_date
+  const due_today = Boolean(row.due_date) && row.due_date <= row.today_date
+  const overdue = Boolean(row.due_date) && row.due_date < row.today_date
+  const today =
+    hk_status === 'dirty' ||
+    hk_status === 'cleaning' ||
+    arriving_today ||
+    departing_today ||
+    stayover_today ||
+    due_today
+  return {
+    ...row,
+    hk_status,
+    ops_status: housekeepingOpsStatus(row),
+    arriving_today,
+    departing_today,
+    stayover_today,
+    due_today,
+    overdue,
+    today,
+    today_guest: row.arrival_guest || row.stay_guest || null,
+  }
 }
 
 app.get('/api/housekeeping', async (req, res) => {
@@ -2598,15 +3013,36 @@ app.get('/api/housekeeping', async (req, res) => {
              to_char(t.due_date, 'YYYY-MM-DD') AS due_date,
              e.full_name AS assigned_name, e.employee_code AS assigned_code,
              s.id AS stay_booking_id,
-             to_char(s.check_out, 'YYYY-MM-DD') AS stay_check_out
+             to_char(s.check_in, 'YYYY-MM-DD') AS stay_check_in,
+             to_char(s.check_out, 'YYYY-MM-DD') AS stay_check_out,
+             COALESCE(su.username, su.email) AS stay_guest,
+             a.id AS arrival_booking_id,
+             to_char(a.check_in, 'YYYY-MM-DD') AS arrival_check_in,
+             COALESCE(au.username, au.email) AS arrival_guest,
+             to_char(CURRENT_DATE, 'YYYY-MM-DD') AS today_date
       FROM rooms r
       JOIN hotels h ON h.id = r.hotel_id
       LEFT JOIN housekeeping_tasks t
         ON t.room_id = r.id AND t.status IN ('dirty', 'in_progress')
       LEFT JOIN hr_employees e ON e.id = t.assigned_to
-      LEFT JOIN bookings s
-        ON s.room_id = r.id AND s.status = 'in_house'
-        AND s.check_in <= CURRENT_DATE AND s.check_out > CURRENT_DATE
+      LEFT JOIN LATERAL (
+        SELECT b.id, b.check_in, b.check_out, b.user_id
+        FROM bookings b
+        WHERE b.room_id = r.id AND b.status = 'in_house'
+        ORDER BY b.check_out, b.id
+        LIMIT 1
+      ) s ON true
+      LEFT JOIN users su ON su.id = s.user_id
+      LEFT JOIN LATERAL (
+        SELECT b.id, b.check_in, b.user_id
+        FROM bookings b
+        WHERE b.room_id = r.id
+          AND b.status = 'confirmed'
+          AND b.check_in = CURRENT_DATE
+        ORDER BY b.id
+        LIMIT 1
+      ) a ON true
+      LEFT JOIN users au ON au.id = a.user_id
       ORDER BY h.name, r.name
     `)
     const staff = await pool.query(`
@@ -2616,9 +3052,20 @@ app.get('/api/housekeeping', async (req, res) => {
         AND (position ILIKE '%housekeeping%' OR department = 'Operation')
       ORDER BY full_name
     `)
+    const mapped = rooms.rows.map(withHousekeepingToday)
+    const todayRooms = mapped.filter((row) => row.today)
     res.json({
-      rooms: rooms.rows.map((row) => ({ ...row, hk_status: housekeepingBoardStatus(row) })),
+      date: mapped[0]?.today_date || null,
+      rooms: mapped,
       staff: staff.rows,
+      today: {
+        rooms: todayRooms.length,
+        to_clean: todayRooms.filter((r) => r.hk_status === 'dirty' || r.hk_status === 'cleaning').length,
+        arrivals: mapped.filter((r) => r.arriving_today).length,
+        departures: mapped.filter((r) => r.departing_today).length,
+        stayovers: mapped.filter((r) => r.stayover_today).length,
+        ready: mapped.filter((r) => r.arriving_today && r.hk_status === 'clean').length,
+      },
     })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -2654,7 +3101,7 @@ app.post('/api/housekeeping', async (req, res) => {
     const room = await pool.query('SELECT id, name, status FROM rooms WHERE id = $1', [room_id])
     if (!room.rows[0]) return res.status(404).json({ error: 'Room not found.' })
     if (room.rows[0].status === 'maintenance') {
-      return res.status(400).json({ error: 'This room is in maintenance. Complete the work order first.' })
+      return res.status(400).json({ error: 'This room is out of order. Put it back in service first.' })
     }
     const type = ['checkout', 'stayover', 'deep_clean'].includes(task_type) ? task_type : 'checkout'
     const occupied = await roomIsOccupied(room_id)
@@ -3069,6 +3516,7 @@ async function findOrCreateWalkIn(name, email) {
     `INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, 'guest') RETURNING id`,
     [username, nextEmail, hash]
   )
+  await ensureGuestProfile(created.rows[0].id)
   return { userId: created.rows[0].id }
 }
 
@@ -3159,7 +3607,7 @@ async function crsQuote(roomId, checkIn, checkOut, excludeBookingId = null, db =
   )
   if (!room.rows[0]) return { error: 'Room not found.' }
   const row = room.rows[0]
-  if (row.status === 'maintenance') return { error: 'This room is in maintenance and cannot be booked.' }
+  if (row.status === 'maintenance') return { error: 'This room is out of order and cannot be booked.' }
   const nights = eachNight(checkIn, checkOut)
   if (!nights.length) return { error: 'Check-out must be after check-in.' }
   const overlap = await db.query(
@@ -3589,6 +4037,36 @@ async function ensureGuestProfile(userId) {
   return r.rows[0] || null
 }
 
+async function syncGuestIdentity(userId, fields = {}) {
+  await ensureGuestProfile(userId)
+  const sets = []
+  const params = []
+  let i = 1
+  if (fields.full_name != null && String(fields.full_name).trim()) {
+    sets.push(`full_name = $${i++}`)
+    params.push(String(fields.full_name).trim())
+  }
+  if (fields.phone != null) {
+    sets.push(`phone = $${i++}`)
+    params.push(String(fields.phone).trim() || null)
+  }
+  if (fields.id_type != null && (ID_TYPES.includes(fields.id_type) || fields.id_type === '')) {
+    sets.push(`id_type = $${i++}`)
+    params.push(ID_TYPES.includes(fields.id_type) ? fields.id_type : null)
+  }
+  if (fields.id_number != null) {
+    sets.push(`id_number = $${i++}`)
+    params.push(String(fields.id_number).trim() || null)
+  }
+  if (fields.notes != null) {
+    sets.push(`notes = $${i++}`)
+    params.push(String(fields.notes))
+  }
+  if (!sets.length) return
+  params.push(userId)
+  await pool.query(`UPDATE guest_profiles SET ${sets.join(', ')} WHERE user_id = $${i}`, params)
+}
+
 async function applyLoyalty(userId, type, points, description, bookingId = null) {
   const profile = await ensureGuestProfile(userId)
   if (!profile) throw new Error('Guest profile not found.')
@@ -3637,6 +4115,10 @@ async function ensureCrmTables() {
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `)
+  await pool.query(`ALTER TABLE guest_profiles ADD COLUMN IF NOT EXISTS full_name VARCHAR(100)`)
+  await pool.query(`ALTER TABLE guest_profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`)
+  await pool.query(`ALTER TABLE guest_profiles ADD COLUMN IF NOT EXISTS id_type VARCHAR(20)`)
+  await pool.query(`ALTER TABLE guest_profiles ADD COLUMN IF NOT EXISTS id_number VARCHAR(80)`)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS loyalty_transactions (
       id SERIAL PRIMARY KEY,

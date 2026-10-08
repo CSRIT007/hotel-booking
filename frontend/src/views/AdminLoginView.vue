@@ -3,7 +3,7 @@
     <div class="mx-auto w-full max-w-md px-4">
       <div class="rounded-2xl border border-stone-200 bg-white p-8 shadow-sm dark:border-stone-700 dark:bg-stone-900">
         <h1 class="font-display text-2xl font-semibold text-stone-800">Admin login</h1>
-        <p class="mt-1 text-sm text-stone-500">Staff only. Use your username and password.</p>
+        <p class="mt-1 text-sm text-stone-500">Receptionist, manager, or owner. Use your username and password.</p>
         <p v-if="idleLogout" class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
           You were signed out after 5 minutes of inactivity.
         </p>
@@ -53,6 +53,7 @@
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthApi } from '../services/auth'
+import { isHotelStaff } from '../utils/roles'
 
 const router = useRouter()
 const route = useRoute()
@@ -69,10 +70,10 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await login(loginId.value, password.value)
-    if (res?.user?.role === 'staff') {
+    if (isHotelStaff(res?.user?.role)) {
       router.replace({ name: 'AdminDashboard' })
     } else {
-      error.value = 'Access denied. Staff account required.'
+      error.value = 'Access denied. Hotel staff account required.'
     }
   } catch (e) {
     error.value = e.message || 'Login failed.'

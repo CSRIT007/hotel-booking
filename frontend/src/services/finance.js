@@ -2,7 +2,7 @@
  * Finance calculations shared by Revenue, Expenses, and Profit admin pages.
  *
  * Recognized revenue:
- *   rooms = confirmed + in-house + completed bookings
+ *   rooms = folio payments collected on confirmed / in-house / completed stays
  *   POS   = paid transactions (refunded excluded)
  * Expenses: all recorded expense rows
  * Profit  = recognized revenue − expenses
@@ -99,6 +99,10 @@ export function isRoomRevenue(booking) {
   return booking.status === 'confirmed' || booking.status === 'in_house' || booking.status === 'completed'
 }
 
+export function roomCollected(booking) {
+  return toMoney(booking?.folio_payments)
+}
+
 export function isPosRevenue(tx) {
   return tx.status === 'paid'
 }
@@ -110,7 +114,13 @@ export function summarizeFinance({ bookings = [], transactions = [], expenses = 
   const pendingPos = transactions.filter((t) => t.status === 'pending')
   const refundedPos = transactions.filter((t) => t.status === 'refunded')
 
-  const roomRevenue = roomItems.reduce((sum, b) => sum + toMoney(b.total_price), 0)
+  const roomRevenue = roomItems.reduce((sum, b) => sum + roomCollected(b), 0)
+  const roomQuoted = roomItems.reduce((sum, b) => sum + toMoney(b.total_price), 0)
+  const roomOutstanding = roomItems.reduce((sum, b) => {
+    const bal = toMoney(b.folio_balance)
+    if (b.folio_payments != null) return sum + Math.max(0, bal)
+    return sum + Math.max(0, toMoney(b.total_price) - roomCollected(b))
+  }, 0)
   const posRevenue = posItems.reduce((sum, t) => sum + toMoney(t.total_amount), 0)
   const pendingRevenue =
     pendingBookings.reduce((sum, b) => sum + toMoney(b.total_price), 0) +
@@ -122,6 +132,8 @@ export function summarizeFinance({ bookings = [], transactions = [], expenses = 
 
   return {
     roomRevenue,
+    roomQuoted,
+    roomOutstanding,
     posRevenue,
     revenue,
     pendingRevenue,
@@ -160,7 +172,7 @@ export function monthlySeries({ bookings = [], transactions = [], expenses = [] 
   for (const b of bookings.filter(isRoomRevenue)) {
     const key = monthKey(b.created_at || b.check_in)
     months.add(key)
-    room[key] = (room[key] || 0) + toMoney(b.total_price)
+    room[key] = (room[key] || 0) + roomCollected(b)
   }
   for (const t of transactions.filter(isPosRevenue)) {
     const key = monthKey(t.created_at || t.transaction_date)

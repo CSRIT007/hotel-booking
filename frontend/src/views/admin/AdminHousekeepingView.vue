@@ -2,30 +2,30 @@
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">Housekeeping</h1>
     <p class="mt-1 text-stone-600">
-      After checkout a room stays dirty until staff clean it. Stay-over cleans a room while the guest is still in-house. Marked clean rooms go back on sale.
+      Today’s rooms{{ boardDateLabel ? ` — ${boardDateLabel}` : '' }}. Dirty rooms and arrivals that still need a clean show first.
     </p>
 
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-      <div class="rounded-xl border border-red-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Dirty</p>
-        <p class="mt-1 text-2xl font-bold text-red-600">{{ countBy('dirty') }}</p>
-      </div>
-      <div class="rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Cleaning</p>
-        <p class="mt-1 text-2xl font-bold text-amber-600">{{ countBy('cleaning') }}</p>
-      </div>
-      <div class="rounded-xl border border-blue-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Occupied</p>
-        <p class="mt-1 text-2xl font-bold text-blue-600">{{ countBy('occupied') }}</p>
-      </div>
-      <div class="rounded-xl border border-green-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Ready</p>
-        <p class="mt-1 text-2xl font-bold text-green-600">{{ countBy('ready') }}</p>
-      </div>
-      <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Maintenance</p>
-        <p class="mt-1 text-2xl font-bold text-stone-800">{{ countBy('maintenance') }}</p>
-      </div>
+      <button type="button" class="rounded-xl border bg-white p-4 text-left shadow-sm" :class="cardClass('to_clean', 'border-red-200')" @click="boardFilter = 'to_clean'">
+        <p class="text-xs font-medium uppercase text-stone-500">To clean</p>
+        <p class="mt-1 text-2xl font-bold text-red-600">{{ todayCounts.to_clean }}</p>
+      </button>
+      <button type="button" class="rounded-xl border bg-white p-4 text-left shadow-sm" :class="cardClass('arrivals', 'border-amber-200')" @click="boardFilter = 'arrivals'">
+        <p class="text-xs font-medium uppercase text-stone-500">Arrivals</p>
+        <p class="mt-1 text-2xl font-bold text-amber-700">{{ todayCounts.arrivals }}</p>
+      </button>
+      <button type="button" class="rounded-xl border bg-white p-4 text-left shadow-sm" :class="cardClass('departures', 'border-blue-200')" @click="boardFilter = 'departures'">
+        <p class="text-xs font-medium uppercase text-stone-500">Departures</p>
+        <p class="mt-1 text-2xl font-bold text-blue-600">{{ todayCounts.departures }}</p>
+      </button>
+      <button type="button" class="rounded-xl border bg-white p-4 text-left shadow-sm" :class="cardClass('stayover', 'border-stone-200')" @click="boardFilter = 'stayover'">
+        <p class="text-xs font-medium uppercase text-stone-500">Stay-over</p>
+        <p class="mt-1 text-2xl font-bold text-stone-800">{{ todayCounts.stayovers }}</p>
+      </button>
+      <button type="button" class="rounded-xl border bg-white p-4 text-left shadow-sm" :class="cardClass('ready', 'border-green-200')" @click="boardFilter = 'ready'">
+        <p class="text-xs font-medium uppercase text-stone-500">Ready for arrival</p>
+        <p class="mt-1 text-2xl font-bold text-green-600">{{ todayCounts.ready }}</p>
+      </button>
     </div>
 
     <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -75,14 +75,19 @@
 
       <div class="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-stone-200 px-4 py-3">
-          <p class="text-sm font-medium text-stone-700">Room board</p>
-          <select v-model="statusFilter" class="rounded-md border border-stone-300 px-2 py-1 text-xs">
-            <option value="">All rooms</option>
+          <p class="text-sm font-medium text-stone-700">{{ boardTitle }}</p>
+          <select v-model="boardFilter" class="rounded-md border border-stone-300 px-2 py-1 text-xs">
+            <option value="today">Today</option>
+            <option value="to_clean">To clean</option>
+            <option value="arrivals">Arrivals</option>
+            <option value="departures">Departures</option>
+            <option value="stayover">Stay-over</option>
             <option value="dirty">Dirty</option>
             <option value="cleaning">Cleaning</option>
             <option value="occupied">Occupied</option>
-            <option value="ready">Ready</option>
-            <option value="maintenance">Maintenance</option>
+            <option value="clean">Clean</option>
+            <option value="out_of_order">Out of order</option>
+            <option value="all">All rooms</option>
           </select>
         </div>
         <div class="overflow-x-auto">
@@ -90,6 +95,7 @@
             <thead class="bg-stone-50">
               <tr>
                 <th class="px-4 py-3 text-left font-medium text-stone-700">Room</th>
+                <th class="px-3 py-3 text-left font-medium text-stone-700">Today</th>
                 <th class="px-3 py-3 text-left font-medium text-stone-700">Status</th>
                 <th class="px-3 py-3 text-left font-medium text-stone-700">Task</th>
                 <th class="px-3 py-3 text-left font-medium text-stone-700">Assigned</th>
@@ -101,6 +107,17 @@
                 <td class="whitespace-nowrap px-4 py-3">
                   <p class="font-semibold text-stone-900">{{ row.room_name }}</p>
                   <p class="text-xs text-stone-500">{{ row.hotel_name }}</p>
+                  <p v-if="row.today_guest" class="text-xs text-stone-500">{{ row.today_guest }}</p>
+                </td>
+                <td class="px-3 py-3">
+                  <div class="flex flex-wrap gap-1">
+                    <span v-if="row.arriving_today" class="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Arrival</span>
+                    <span v-if="row.departing_today" class="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">Departs</span>
+                    <span v-if="row.stayover_today" class="inline-flex rounded-full bg-stone-100 px-2 py-0.5 text-xs font-semibold text-stone-700">Stay-over</span>
+                    <span v-if="row.overdue" class="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">Overdue</span>
+                    <span v-if="row.arriving_today && (row.hk_status === 'dirty' || row.hk_status === 'cleaning')" class="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Clean first</span>
+                    <span v-if="!row.arriving_today && !row.departing_today && !row.stayover_today && !row.overdue" class="text-stone-400">—</span>
+                  </div>
                 </td>
                 <td class="whitespace-nowrap px-3 py-3">
                   <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold" :class="boardClass(row.hk_status)">
@@ -127,7 +144,7 @@
                   <span v-else class="text-stone-400">—</span>
                 </td>
                 <td class="whitespace-nowrap px-3 py-3">
-                  <template v-if="row.task_id && row.hk_status !== 'maintenance'">
+                  <template v-if="row.task_id && row.hk_status !== 'out_of_order'">
                     <button
                       v-if="row.task_status === 'dirty'"
                       type="button"
@@ -141,6 +158,12 @@
                       @click="setTask(row, 'clean')"
                     >Mark clean</button>
                   </template>
+                  <button
+                    v-else-if="row.hk_status === 'occupied' && !row.task_id"
+                    type="button"
+                    class="text-brand-600 hover:underline"
+                    @click="openStayover(row)"
+                  >Stay-over</button>
                   <span v-else class="text-stone-400">—</span>
                 </td>
               </tr>
@@ -160,11 +183,12 @@ import { todayKey } from '../../services/hr'
 
 const rooms = ref([])
 const staff = ref([])
+const boardDate = ref('')
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const success = ref('')
-const statusFilter = ref('')
+const boardFilter = ref('today')
 const form = reactive({
   room_id: 0,
   task_type: '',
@@ -173,12 +197,40 @@ const form = reactive({
   notes: '',
 })
 
+const todayCounts = computed(() => ({
+  to_clean: rooms.value.filter((r) => r.hk_status === 'dirty' || r.hk_status === 'cleaning').length,
+  arrivals: rooms.value.filter((r) => r.arriving_today).length,
+  departures: rooms.value.filter((r) => r.departing_today).length,
+  stayovers: rooms.value.filter((r) => r.stayover_today).length,
+  ready: rooms.value.filter((r) => r.arriving_today && r.hk_status === 'clean').length,
+}))
+
+const boardDateLabel = computed(() => formatBoardDate(boardDate.value))
+
+const boardTitle = computed(() => {
+  const map = {
+    today: 'Today’s rooms',
+    to_clean: 'To clean',
+    arrivals: 'Arrivals',
+    departures: 'Departures',
+    stayover: 'Stay-over',
+    ready: 'Ready for arrival',
+    dirty: 'Dirty',
+    cleaning: 'Cleaning',
+    occupied: 'Occupied',
+    clean: 'Clean',
+    out_of_order: 'Out of order',
+    all: 'All rooms',
+  }
+  return map[boardFilter.value] || 'Room board'
+})
+
 const openableRooms = computed(() => {
   if (form.task_type === 'stayover') {
     return rooms.value.filter((r) => r.hk_status === 'occupied' && !r.task_id)
   }
   if (form.task_type === 'checkout' || form.task_type === 'deep_clean') {
-    return rooms.value.filter((r) => r.hk_status === 'ready')
+    return rooms.value.filter((r) => r.hk_status === 'clean')
   }
   return []
 })
@@ -189,17 +241,49 @@ watch(
     form.room_id = 0
   }
 )
+
 const filteredRooms = computed(() => {
-  if (!statusFilter.value) return rooms.value
-  return rooms.value.filter((r) => r.hk_status === statusFilter.value)
+  let list = rooms.value
+  const filter = boardFilter.value
+  if (filter === 'today') list = list.filter((r) => r.today)
+  else if (filter === 'to_clean') list = list.filter((r) => r.hk_status === 'dirty' || r.hk_status === 'cleaning')
+  else if (filter === 'arrivals') list = list.filter((r) => r.arriving_today)
+  else if (filter === 'departures') list = list.filter((r) => r.departing_today)
+  else if (filter === 'stayover') list = list.filter((r) => r.stayover_today)
+  else if (filter === 'ready') list = list.filter((r) => r.arriving_today && r.hk_status === 'clean')
+  else if (filter && filter !== 'all') list = list.filter((r) => r.hk_status === filter)
+  return [...list].sort((a, b) => todayRank(a) - todayRank(b) || String(a.room_name).localeCompare(String(b.room_name)))
 })
 
-function countBy(status) {
-  return rooms.value.filter((r) => r.hk_status === status).length
+function todayRank(row) {
+  if (row.hk_status === 'dirty') return 1
+  if (row.hk_status === 'cleaning') return 2
+  if (row.arriving_today && row.hk_status !== 'clean') return 3
+  if (row.departing_today) return 4
+  if (row.arriving_today) return 5
+  if (row.stayover_today) return 6
+  return 9
+}
+
+function cardClass(filter, border) {
+  return boardFilter.value === filter ? `${border} ring-1 ring-brand-400` : border
+}
+
+function formatBoardDate(value) {
+  if (!value) return ''
+  const [y, m, d] = String(value).split('-').map(Number)
+  if (!y || !m || !d) return value
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function statusLabel(status) {
-  const map = { dirty: 'Dirty', cleaning: 'Cleaning', occupied: 'Occupied', ready: 'Ready', maintenance: 'Maintenance' }
+  const map = {
+    dirty: 'Dirty',
+    cleaning: 'Cleaning',
+    occupied: 'Occupied',
+    clean: 'Clean',
+    out_of_order: 'Out of order',
+  }
   return map[status] || status
 }
 
@@ -213,8 +297,8 @@ function boardClass(status) {
     dirty: 'bg-red-100 text-red-800',
     cleaning: 'bg-amber-100 text-amber-800',
     occupied: 'bg-blue-100 text-blue-800',
-    ready: 'bg-green-100 text-green-800',
-    maintenance: 'bg-stone-200 text-stone-700',
+    clean: 'bg-green-100 text-green-800',
+    out_of_order: 'bg-stone-200 text-stone-700',
   }
   return map[status] || 'bg-stone-100 text-stone-700'
 }
@@ -225,6 +309,7 @@ async function load() {
     const data = await getHousekeeping()
     rooms.value = data.rooms || []
     staff.value = data.staff || []
+    boardDate.value = data.date || todayKey()
   } catch (e) {
     error.value = e.message
   }
@@ -268,6 +353,22 @@ async function setTask(row, status) {
   error.value = ''
   try {
     await updateHousekeepingTask(row.task_id, { status })
+    await load()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function openStayover(row) {
+  error.value = ''
+  success.value = ''
+  try {
+    await createHousekeepingTask({
+      room_id: row.room_id,
+      task_type: 'stayover',
+      due_date: boardDate.value || todayKey(),
+    })
+    success.value = `Stay-over opened for ${row.room_name}.`
     await load()
   } catch (e) {
     error.value = e.message

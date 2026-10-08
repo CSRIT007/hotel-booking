@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="text-2xl font-semibold text-stone-800">User management</h1>
-    <p class="mt-1 text-stone-600">Create staff, change roles, disable accounts, and reset passwords. At least one active staff account must remain.</p>
+    <p class="mt-1 text-stone-600">Receptionist, manager, or owner. At least one active owner account must remain.</p>
 
     <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <form class="rounded-xl border border-stone-200 bg-white p-5 shadow-sm" @submit.prevent="create">
@@ -23,7 +23,9 @@
           <div>
             <label class="block text-xs font-medium text-stone-700">Role</label>
             <select v-model="form.role" class="field">
-              <option value="staff">Staff</option>
+              <option value="receptionist">Receptionist</option>
+              <option value="manager">Manager</option>
+              <option value="owner">Owner</option>
               <option value="guest">Guest</option>
             </select>
           </div>
@@ -39,7 +41,9 @@
         <div class="flex items-center gap-3 border-b border-stone-200 px-4 py-3">
           <select v-model="roleFilter" class="rounded-md border border-stone-300 px-2 py-1 text-sm" @change="load">
             <option value="">All roles</option>
-            <option value="staff">Staff</option>
+            <option value="receptionist">Receptionist</option>
+            <option value="manager">Manager</option>
+            <option value="owner">Owner</option>
             <option value="guest">Guest</option>
           </select>
         </div>
@@ -60,14 +64,24 @@
                   <p class="font-medium text-stone-800">{{ u.username }}</p>
                   <p class="text-xs text-stone-500">{{ u.email }}</p>
                 </td>
-                <td class="px-4 py-3 capitalize">{{ u.role }}</td>
+                <td class="px-4 py-3">
+                  <select
+                    class="rounded-md border border-stone-300 px-2 py-1 text-xs"
+                    :value="u.role === 'staff' ? 'owner' : u.role"
+                    :disabled="isSelf(u)"
+                    @change="setRole(u, $event.target.value)"
+                  >
+                    <option value="receptionist">Receptionist</option>
+                    <option value="manager">Manager</option>
+                    <option value="owner">Owner</option>
+                    <option value="guest">Guest</option>
+                  </select>
+                </td>
                 <td class="px-4 py-3">
                   <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(u)">{{ statusLabel(u) }}</span>
                 </td>
                 <td class="px-4 py-3 text-stone-500">{{ formatWhen(u.last_login_at) || 'Never' }}</td>
                 <td class="px-4 py-3 text-right whitespace-nowrap">
-                  <button v-if="u.role !== 'staff'" type="button" class="mr-2 text-brand-600 hover:underline" @click="setRole(u, 'staff')">Make staff</button>
-                  <button v-else-if="!isSelf(u)" type="button" class="mr-2 text-stone-600 hover:underline" @click="setRole(u, 'guest')">Make guest</button>
                   <button v-if="isLocked(u)" type="button" class="mr-2 text-amber-700 hover:underline" @click="unlock(u)">Unlock</button>
                   <button v-if="u.status !== 'disabled' && !isSelf(u)" type="button" class="mr-2 text-red-600 hover:underline" @click="askDisable(u)">Disable</button>
                   <button v-else-if="u.status === 'disabled'" type="button" class="mr-2 text-green-600 hover:underline" @click="setStatus(u, 'active')">Enable</button>
@@ -111,7 +125,7 @@ const form = reactive({
   username: '',
   email: '',
   password: '',
-  role: 'staff',
+  role: 'receptionist',
 })
 
 function isSelf(u) {

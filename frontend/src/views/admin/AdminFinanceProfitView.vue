@@ -2,7 +2,7 @@
   <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Profit</h1>
     <p class="mt-1 text-stone-600">
-      Profit = recognized revenue (rooms + paid POS) − recorded expenses, including salaries from paid payroll.
+      Profit = room folio payments collected + paid POS − recorded expenses (including paid payroll).
     </p>
 
     <FinanceDateFilter v-model:from="from" v-model:to="to" />
@@ -36,7 +36,7 @@
       <div class="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
         <h2 class="text-sm font-semibold text-stone-800">How profit is calculated</h2>
         <ul class="mt-4 space-y-2 text-sm text-stone-600">
-          <li class="flex justify-between"><span>Room bookings (confirmed, in-house, completed)</span><span class="font-medium text-stone-800">{{ formatMoney(summary.roomRevenue) }}</span></li>
+          <li class="flex justify-between"><span>Room folio payments collected</span><span class="font-medium text-stone-800">{{ formatMoney(summary.roomRevenue) }}</span></li>
           <li class="flex justify-between"><span>+ POS sales (paid)</span><span class="font-medium text-stone-800">{{ formatMoney(summary.posRevenue) }}</span></li>
           <li class="flex justify-between border-t border-stone-200 pt-2"><span>Recognized revenue</span><span class="font-semibold text-green-600">{{ formatMoney(summary.revenue) }}</span></li>
           <li class="flex justify-between"><span>− Expenses</span><span class="font-medium text-red-600">{{ formatMoney(summary.expenseTotal) }}</span></li>

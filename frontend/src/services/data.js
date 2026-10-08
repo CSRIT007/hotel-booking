@@ -152,6 +152,11 @@ export async function updateRoom(id, payload) {
   throw new Error('No API configured')
 }
 
+export async function setRoomOps(id, action) {
+  if (hasLocalApi) return await localApi.setRoomOps(id, action)
+  throw new Error('No API configured')
+}
+
 export async function deleteRoom(id) {
   if (hasLocalApi) return await localApi.deleteRoom(id)
   throw new Error('No API configured')
@@ -301,6 +306,26 @@ export async function getStaffAlerts() {
     }
   }
   return { new_messages: 0, pending_bookings: 0, latest_message: null }
+}
+
+export async function getGuests(params = {}) {
+  if (hasLocalApi) return await localApi.getGuests(params)
+  throw new Error('No API configured')
+}
+
+export async function getGuest(id) {
+  if (hasLocalApi) return await localApi.getGuest(id)
+  throw new Error('No API configured')
+}
+
+export async function createGuest(payload) {
+  if (hasLocalApi) return await localApi.createGuest(payload)
+  throw new Error('No API configured')
+}
+
+export async function updateGuest(id, payload) {
+  if (hasLocalApi) return await localApi.updateGuest(id, payload)
+  throw new Error('No API configured')
 }
 
 export async function getUsers(params = {}) {

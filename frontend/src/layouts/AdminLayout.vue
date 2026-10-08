@@ -16,49 +16,49 @@
           <span class="w-6 text-center">▣</span> Dashboard
         </router-link>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/bookings') || canSee('/admin/properties')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('pms')">
             <span><span class="w-6 text-center inline-block">🏨</span> Property (PMS)</span>
             <span>{{ openGroup === 'pms' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'pms'" class="admin-sub">
-            <router-link to="/admin/properties" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/properties') }">Properties</router-link>
-            <router-link to="/admin/rooms" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/rooms') }">Rooms</router-link>
-            <router-link to="/admin/bookings" class="admin-sub-link flex items-center justify-between" :class="{ 'admin-sub-active': isActive('/admin/bookings') }">
+            <router-link v-if="canSee('/admin/properties')" to="/admin/properties" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/properties') }">Properties</router-link>
+            <router-link v-if="canSee('/admin/rooms')" to="/admin/rooms" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/rooms') }">Rooms</router-link>
+            <router-link v-if="canSee('/admin/bookings')" to="/admin/bookings" class="admin-sub-link flex items-center justify-between" :class="{ 'admin-sub-active': isActive('/admin/bookings') }">
               <span>Bookings</span>
               <span v-if="pendingBookings > 0" class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-400 px-1.5 text-[10px] font-semibold text-stone-900">{{ pendingBookings }}</span>
             </router-link>
-            <router-link to="/admin/guests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/guests') }">Guests</router-link>
-            <router-link to="/admin/housekeeping" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/housekeeping') }">Housekeeping</router-link>
-            <router-link to="/admin/slides" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/slides') }">Slideshow</router-link>
+            <router-link v-if="canSee('/admin/guests')" to="/admin/guests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/guests') }">Guests</router-link>
+            <router-link v-if="canSee('/admin/housekeeping')" to="/admin/housekeeping" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/housekeeping') }">Housekeeping</router-link>
+            <router-link v-if="canSee('/admin/slides')" to="/admin/slides" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/slides') }">Slideshow</router-link>
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/pos-sales')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('pos')">
             <span><span class="w-6 text-center inline-block">🛒</span> POS System</span>
             <span>{{ openGroup === 'pos' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'pos'" class="admin-sub">
-            <router-link to="/admin/pos-sales" class="admin-sub-link">Sales</router-link>
-            <router-link to="/admin/pos-products" class="admin-sub-link">Products</router-link>
-            <router-link to="/admin/pos-transactions" class="admin-sub-link">Transactions</router-link>
+            <router-link v-if="canSee('/admin/pos-sales')" to="/admin/pos-sales" class="admin-sub-link">Sales</router-link>
+            <router-link v-if="canSee('/admin/pos-products')" to="/admin/pos-products" class="admin-sub-link">Products</router-link>
+            <router-link v-if="canSee('/admin/pos-transactions')" to="/admin/pos-transactions" class="admin-sub-link">Transactions</router-link>
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/crs-availability') || canSee('/admin/crs-rates')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('crs')">
             <span><span class="w-6 text-center inline-block">🌐</span> Reservations (CRS)</span>
             <span>{{ openGroup === 'crs' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'crs'" class="admin-sub">
-            <router-link to="/admin/crs-rates" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-rates') }">Rates</router-link>
-            <router-link to="/admin/crs-channels" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-channels') }">Channels</router-link>
-            <router-link to="/admin/crs-availability" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-availability') }">Availability</router-link>
+            <router-link v-if="canSee('/admin/crs-rates')" to="/admin/crs-rates" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-rates') }">Rates</router-link>
+            <router-link v-if="canSee('/admin/crs-channels')" to="/admin/crs-channels" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-channels') }">Channels</router-link>
+            <router-link v-if="canSee('/admin/crs-availability')" to="/admin/crs-availability" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/crs-availability') }">Availability</router-link>
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/crm-campaigns')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('crm')">
             <span><span class="w-6 text-center inline-block">👥</span> CRM</span>
             <span>{{ openGroup === 'crm' ? '▼' : '▶' }}</span>
@@ -70,7 +70,7 @@
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/finance-revenue')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('finance')">
             <span><span class="w-6 text-center inline-block">💰</span> Finance</span>
             <span>{{ openGroup === 'finance' ? '▼' : '▶' }}</span>
@@ -82,7 +82,7 @@
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/hr-employees')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('hr')">
             <span><span class="w-6 text-center inline-block">👤</span> HR</span>
             <span>{{ openGroup === 'hr' ? '▼' : '▶' }}</span>
@@ -96,19 +96,19 @@
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/maintenance-requests')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('maintenance')">
             <span><span class="w-6 text-center inline-block">🔧</span> Maintenance</span>
             <span>{{ openGroup === 'maintenance' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'maintenance'" class="admin-sub">
-            <router-link to="/admin/maintenance-requests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-requests') }">Requests</router-link>
-            <router-link to="/admin/maintenance-schedule" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-schedule') }">Schedule</router-link>
-            <router-link to="/admin/maintenance-inventory" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-inventory') }">Inventory</router-link>
+            <router-link v-if="canSee('/admin/maintenance-requests')" to="/admin/maintenance-requests" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-requests') }">Requests</router-link>
+            <router-link v-if="canSee('/admin/maintenance-schedule')" to="/admin/maintenance-schedule" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-schedule') }">Schedule</router-link>
+            <router-link v-if="canSee('/admin/maintenance-inventory')" to="/admin/maintenance-inventory" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/maintenance-inventory') }">Inventory</router-link>
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/reports')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('analytics')">
             <span><span class="w-6 text-center inline-block">📊</span> Analytics</span>
             <span>{{ openGroup === 'analytics' ? '▼' : '▶' }}</span>
@@ -119,21 +119,21 @@
           </div>
         </div>
 
-        <div class="admin-nav-group">
+        <div v-if="canSee('/admin/audit-log') || canSee('/admin/users')" class="admin-nav-group">
           <button type="button" class="admin-nav w-full justify-between" @click="toggle('admin')">
             <span><span class="w-6 text-center inline-block">🛡</span> Admin</span>
             <span>{{ openGroup === 'admin' ? '▼' : '▶' }}</span>
           </button>
           <div v-show="openGroup === 'admin'" class="admin-sub">
-            <router-link to="/admin/users" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/users') }">User management</router-link>
-            <router-link to="/admin/audit-log" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/audit-log') }">Audit log</router-link>
-            <router-link to="/admin/login-activity" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/login-activity') }">Login activity</router-link>
-            <router-link to="/admin/security" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/security') }">Security</router-link>
+            <router-link v-if="canSee('/admin/users')" to="/admin/users" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/users') }">User management</router-link>
+            <router-link v-if="canSee('/admin/audit-log')" to="/admin/audit-log" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/audit-log') }">Audit log</router-link>
+            <router-link v-if="canSee('/admin/login-activity')" to="/admin/login-activity" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/login-activity') }">Login activity</router-link>
+            <router-link v-if="canSee('/admin/security')" to="/admin/security" class="admin-sub-link" :class="{ 'admin-sub-active': isActive('/admin/security') }">Security</router-link>
           </div>
         </div>
       </nav>
       <div class="border-t border-stone-700 p-3 space-y-1">
-        <p class="px-4 py-1 text-xs text-stone-400">Signed in as {{ currentUser?.username }}</p>
+        <p class="px-4 py-1 text-xs text-stone-400">Signed in as {{ currentUser?.username }} · {{ roleLabel(currentUser?.role) }}</p>
         <a href="/" target="_blank" class="admin-nav block">↗ View site</a>
         <button type="button" class="admin-nav w-full text-left" @click="requestLogout">Logout</button>
       </div>
@@ -154,6 +154,7 @@
             {{ pendingBookings }} booking request{{ pendingBookings === 1 ? '' : 's' }}
           </router-link>
           <router-link
+            v-if="canSee('/admin/contacts')"
             to="/admin/contacts"
             class="relative inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100 dark:text-stone-200 dark:hover:bg-stone-800"
             :class="{ 'bg-stone-100 dark:bg-stone-800': isActive('/admin/contacts') }"
@@ -202,19 +203,24 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth'
 import { useStaffAlerts } from '../composables/useStaffAlerts'
+import { roleLabel } from '../utils/roles'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import AdminNavSearch from '../components/AdminNavSearch.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { logout: doLogout, currentUser } = useAuth()
+const { logout: doLogout, currentUser, canAccess } = useAuth()
 const { newMessages, pendingBookings, latestMessage, toast, refresh, dismissToast } = useStaffAlerts()
 const sidebarOpen = ref(true)
 const openGroup = ref('')
 const showLogoutConfirm = ref(false)
 const isDashboard = computed(() => route.name === 'AdminDashboard')
 const year = new Date().getFullYear()
+
+function canSee(path) {
+  return canAccess(path)
+}
 
 function isActive(path) {
   return route.path === path || route.path.startsWith(`${path}/`)

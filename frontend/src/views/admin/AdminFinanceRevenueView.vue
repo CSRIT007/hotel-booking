@@ -2,7 +2,7 @@
   <div class="finance-root">
     <h1 class="text-2xl font-semibold text-stone-800">Revenue</h1>
     <p class="mt-1 text-stone-600">
-      Recognized income from confirmed/completed room bookings and paid POS sales.
+      Room revenue is folio payments collected on confirmed, in-house, and completed stays — not the quoted total. POS is paid sales.
     </p>
 
     <FinanceDateFilter v-model:from="from" v-model:to="to" />
@@ -14,19 +14,19 @@
         <p class="mt-1 text-xs text-stone-500">Rooms + POS (paid)</p>
       </div>
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Room revenue</p>
+        <p class="text-xs font-medium uppercase text-stone-500">Room collected</p>
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ formatMoney(summary.roomRevenue) }}</p>
-        <p class="mt-1 text-xs text-stone-500">{{ summary.counts.room }} confirmed/completed</p>
+        <p class="mt-1 text-xs text-stone-500">{{ summary.counts.room }} stays · quoted {{ formatMoney(summary.roomQuoted) }}</p>
+      </div>
+      <div class="rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
+        <p class="text-xs font-medium uppercase text-stone-500">Room outstanding</p>
+        <p class="mt-1 text-2xl font-bold text-amber-600">{{ formatMoney(summary.roomOutstanding) }}</p>
+        <p class="mt-1 text-xs text-stone-500">Folio balance still due</p>
       </div>
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
         <p class="text-xs font-medium uppercase text-stone-500">POS revenue</p>
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ formatMoney(summary.posRevenue) }}</p>
         <p class="mt-1 text-xs text-stone-500">{{ summary.counts.pos }} paid sales</p>
-      </div>
-      <div class="rounded-xl border border-amber-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Pipeline</p>
-        <p class="mt-1 text-2xl font-bold text-amber-600">{{ formatMoney(summary.pendingRevenue) }}</p>
-        <p class="mt-1 text-xs text-stone-500">Pending bookings and POS (not counted yet)</p>
       </div>
     </div>
 
@@ -80,7 +80,7 @@
 
     <div class="mt-6 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
       <div class="border-b border-stone-200 px-4 py-3">
-        <h2 class="font-semibold text-stone-800">Room bookings counted as revenue</h2>
+        <h2 class="font-semibold text-stone-800">Room stays counted as collected revenue</h2>
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full divide-y divide-stone-200 text-sm">
@@ -91,7 +91,8 @@
               <th class="px-4 py-3 text-left font-medium text-stone-700">Guest</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Room</th>
               <th class="px-4 py-3 text-left font-medium text-stone-700">Status</th>
-              <th class="px-4 py-3 text-right font-medium text-stone-700">Amount</th>
+              <th class="px-4 py-3 text-right font-medium text-stone-700">Quoted</th>
+              <th class="px-4 py-3 text-right font-medium text-stone-700">Collected</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-stone-200">
@@ -101,13 +102,14 @@
               <td class="px-4 py-3">{{ b.username || b.email || '—' }}</td>
               <td class="px-4 py-3">{{ b.room_name || '—' }}</td>
               <td class="px-4 py-3 capitalize">{{ b.status }}</td>
-              <td class="px-4 py-3 text-right font-medium">{{ formatMoney(b.total_price) }}</td>
+              <td class="px-4 py-3 text-right text-stone-600">{{ formatMoney(b.total_price) }}</td>
+              <td class="px-4 py-3 text-right font-medium">{{ formatMoney(b.folio_payments) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p v-if="summary.roomItems.length === 0 && !loading" class="p-4 text-center text-stone-500">
-        No confirmed or completed bookings in this date range.
+        No confirmed, in-house, or completed stays in this date range.
       </p>
     </div>
 
@@ -182,7 +184,7 @@ const months = computed(() =>
   monthlySeries({ bookings: rangedBookings.value, transactions: rangedTransactions.value })
 )
 const sourceRows = computed(() => [
-  { name: 'Room bookings', total: summary.value.roomRevenue },
+  { name: 'Room folio payments', total: summary.value.roomRevenue },
   { name: 'POS sales', total: summary.value.posRevenue },
 ])
 

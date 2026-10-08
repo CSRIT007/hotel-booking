@@ -19,7 +19,7 @@
         <p class="mt-1 text-2xl font-bold text-amber-600">{{ board.counts?.blocked || 0 }}</p>
       </div>
       <div class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p class="text-xs font-medium uppercase text-stone-500">Maintenance</p>
+        <p class="text-xs font-medium uppercase text-stone-500">Out of order</p>
         <p class="mt-1 text-2xl font-bold text-stone-800">{{ board.counts?.maintenance || 0 }}</p>
       </div>
     </div>
@@ -118,7 +118,7 @@ function cellTitle(date, cell) {
     return `${date} · reserved${st}`
   }
   if (cell.status === 'blocked') return `${date} · stop sell`
-  if (cell.status === 'maintenance') return `${date} · maintenance`
+  if (cell.status === 'maintenance') return `${date} · out of order`
   return `${date} · ${cell.status}`
 }
 

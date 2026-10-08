@@ -3,20 +3,6 @@
     <h1 class="text-2xl font-semibold text-stone-800">Dashboard</h1>
     <p class="mt-1 text-stone-600">Summary of bookings, revenue and rooms.</p>
 
-    <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" style="perspective: 1100px">
-      <router-link
-        v-for="item in shortcutItems"
-        :key="item.to"
-        :to="item.to"
-        class="dash-box rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-800 hover:border-brand-400 hover:text-brand-700"
-        @mousemove="tiltBox"
-        @mouseleave="untiltBox"
-      >
-        {{ item.label }}
-        <span class="mt-1 block text-xs font-normal text-stone-500">{{ item.hint }}</span>
-      </router-link>
-    </div>
-
     <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" style="perspective: 1100px">
       <div class="dash-box rounded-xl border border-blue-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
         <p class="text-xs font-medium uppercase text-stone-500">Pending requests</p>
@@ -24,14 +10,17 @@
         <router-link to="/admin/bookings?status=pending" class="relative z-10 mt-2 text-sm text-blue-600 hover:underline">View</router-link>
       </div>
       <div class="dash-box rounded-xl border border-green-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
-        <p class="text-xs font-medium uppercase text-stone-500">Revenue</p>
+        <p class="text-xs font-medium uppercase text-stone-500">Collected</p>
         <p class="mt-1 text-2xl font-bold text-green-600">{{ formatMoney(totalRevenue) }}</p>
-        <router-link to="/admin/bookings" class="relative z-10 mt-2 text-sm text-green-600 hover:underline">Bookings</router-link>
+        <router-link to="/admin/bookings" class="relative z-10 mt-2 text-sm text-green-600 hover:underline">Folio payments</router-link>
       </div>
       <div class="dash-box rounded-xl border border-stone-200 bg-white p-4" @mousemove="tiltBox" @mouseleave="untiltBox">
         <p class="text-xs font-medium uppercase text-stone-500">Rooms</p>
-        <p class="mt-1 text-2xl font-bold text-stone-800">{{ roomCounts.available }} / {{ roomCounts.total }}</p>
-        <router-link to="/admin/rooms" class="relative z-10 mt-2 text-sm text-stone-600 hover:underline">Add / remove rooms</router-link>
+        <p class="mt-1 text-2xl font-bold text-stone-800">{{ roomCounts.clean }} clean</p>
+        <p class="mt-1 text-xs text-stone-500">
+          {{ roomCounts.dirty }} dirty · {{ roomCounts.occupied }} occupied · {{ roomCounts.out_of_order }} out of order
+        </p>
+        <router-link to="/admin/housekeeping" class="relative z-10 mt-2 text-sm text-stone-600 hover:underline">Room status</router-link>
       </div>
       <div
         class="dash-box rounded-xl border bg-white p-4"
@@ -112,21 +101,42 @@
       <p v-if="loading" class="p-4 text-center text-stone-500">Loading…</p>
     </div>
 
-    <div class="dash-box mt-8 rounded-xl border border-stone-200 bg-white p-6" @mousemove="tiltBox" @mouseleave="untiltBox">
+    <div v-if="visibleQuickLinks.length" class="mt-8">
       <h2 class="font-semibold text-stone-800">Quick links</h2>
-      <div class="mt-3 space-y-3 text-sm">
-        <div
-          v-for="(row, i) in quickLinkRows"
-          :key="i"
-          class="flex justify-between gap-x-3"
-        >
+      <div
+        v-if="compactQuickLinks"
+        class="dash-box mt-4 rounded-xl border border-stone-200 bg-white p-5"
+        @mousemove="tiltBox"
+        @mouseleave="untiltBox"
+      >
+        <div class="relative z-10 flex flex-wrap gap-2">
           <router-link
-            v-for="link in row"
+            v-for="link in visibleQuickLinks"
             :key="link.to"
             :to="link.to"
-            class="shrink-0 whitespace-nowrap text-brand-600 hover:underline"
+            class="inline-flex items-center rounded-lg border border-stone-200 bg-stone-50 px-3 py-1.5 text-sm font-medium text-stone-700 hover:border-brand-400 hover:bg-stone-100 hover:text-brand-700"
           >{{ link.label }}</router-link>
         </div>
+      </div>
+      <div v-else class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3" style="perspective: 1100px">
+        <section
+          v-for="group in quickLinkGroups"
+          :key="group.name"
+          class="dash-box rounded-xl border border-stone-200 p-4"
+          @mousemove="tiltBox"
+          @mouseleave="untiltBox"
+        >
+          <h3 class="relative z-10 text-sm font-semibold text-stone-800">{{ group.name }}</h3>
+          <p v-if="group.hint" class="relative z-10 mt-0.5 text-xs text-stone-500">{{ group.hint }}</p>
+          <div class="relative z-10 mt-3 grid grid-cols-2 gap-2">
+            <router-link
+              v-for="link in group.links"
+              :key="link.to"
+              :to="link.to"
+              class="rounded-lg border border-stone-200 bg-white/80 px-3 py-2 text-sm font-medium text-stone-700 hover:border-brand-400 hover:bg-stone-100 hover:text-brand-700"
+            >{{ link.label }}</router-link>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -136,56 +146,82 @@
 import { ref, computed, onMounted } from 'vue'
 import { getBookings, getRooms } from '../../services/data'
 import { useStaffAlerts } from '../../composables/useStaffAlerts'
+import { useAuth } from '../../composables/useAuth'
 import { formatMoney } from '../../utils/money'
+import { roomCollected } from '../../services/finance'
 
 const { newMessages } = useStaffAlerts()
+const { canAccess, roleLevel } = useAuth()
 const bookings = ref([])
 const rooms = ref([])
 const loading = ref(true)
 
-const shortcutItems = [
-  { to: '/admin/properties', label: 'Properties', hint: 'Add or remove hotels' },
-  { to: '/admin/slides', label: 'Slideshow', hint: 'Home page hero photos' },
-  { to: '/admin/bookings', label: 'Bookings', hint: 'Guest stays and requests' },
-  { to: '/admin/hr-employees', label: 'Employee information', hint: 'Staff directory and positions' },
-  { to: '/admin/maintenance-requests', label: 'Requests', hint: 'Repair and work orders' },
-  { to: '/admin/analytics-kpi', label: 'KPI', hint: 'Performance indicators' },
-  { to: '/admin/audit-log', label: 'Audit log', hint: 'Who changed what' },
-  { to: '/admin/crm-loyalty', label: 'Loyalty', hint: 'Points and member rewards' },
-]
+const GROUP_HINTS = {
+  Property: 'Hotels, rooms, stays, and housekeeping',
+  POS: 'Sales, products, and transactions',
+  Reservations: 'Rates, channels, and availability',
+  CRM: 'Campaigns, loyalty, and messages',
+  Finance: 'Revenue, expenses, and profit',
+  HR: 'Staff, schedules, and payroll',
+  Maintenance: 'Requests, schedule, and inventory',
+  Analytics: 'Reports and performance',
+  Admin: 'Users and activity logs',
+}
 
 const quickLinks = [
-  { to: '/admin/properties', label: 'Properties' },
-  { to: '/admin/rooms', label: 'Rooms' },
-  { to: '/admin/bookings', label: 'Bookings' },
-  { to: '/admin/guests', label: 'Guests' },
-  { to: '/admin/housekeeping', label: 'Housekeeping' },
-  { to: '/admin/slides', label: 'Slideshow' },
-  { to: '/admin/pos-sales', label: 'Sales' },
-  { to: '/admin/crs-rates', label: 'Rates' },
-  { to: '/admin/crm-campaigns', label: 'Campaigns' },
-  { to: '/admin/crm-loyalty', label: 'Loyalty' },
-  { to: '/admin/crm-communications', label: 'Communications' },
-  { to: '/admin/finance-revenue', label: 'Revenue' },
-  { to: '/admin/finance-expense', label: 'Expenses' },
-  { to: '/admin/finance-profit', label: 'Profit' },
-  { to: '/admin/hr-employees', label: 'Employee information' },
-  { to: '/admin/hr-org', label: 'Departments' },
-  { to: '/admin/hr-schedules', label: 'Schedules' },
-  { to: '/admin/hr-payroll', label: 'Payroll' },
-  { to: '/admin/hr-leaves', label: 'Leaves' },
-  { to: '/admin/maintenance-requests', label: 'Requests' },
-  { to: '/admin/maintenance-schedule', label: 'Schedule' },
-  { to: '/admin/maintenance-inventory', label: 'Inventory' },
-  { to: '/admin/analytics-kpi', label: 'KPI' },
-  { to: '/admin/users', label: 'Users' },
-  { to: '/admin/audit-log', label: 'Audit log' },
-  { to: '/admin/contacts', label: 'Messages' },
+  { to: '/admin/properties', label: 'Properties', group: 'Property' },
+  { to: '/admin/rooms', label: 'Rooms', group: 'Property' },
+  { to: '/admin/bookings', label: 'Bookings', group: 'Property' },
+  { to: '/admin/guests', label: 'Guests', group: 'Property' },
+  { to: '/admin/housekeeping', label: 'Housekeeping', group: 'Property' },
+  { to: '/admin/slides', label: 'Slideshow', group: 'Property' },
+  { to: '/admin/pos-sales', label: 'Sales', group: 'POS' },
+  { to: '/admin/pos-products', label: 'Products', group: 'POS' },
+  { to: '/admin/pos-transactions', label: 'Transactions', group: 'POS' },
+  { to: '/admin/crs-rates', label: 'Rates', group: 'Reservations' },
+  { to: '/admin/crs-channels', label: 'Channels', group: 'Reservations' },
+  { to: '/admin/crs-availability', label: 'Availability', group: 'Reservations' },
+  { to: '/admin/crm-campaigns', label: 'Campaigns', group: 'CRM' },
+  { to: '/admin/crm-loyalty', label: 'Loyalty', group: 'CRM' },
+  { to: '/admin/crm-communications', label: 'Communications', group: 'CRM' },
+  { to: '/admin/contacts', label: 'Messages', group: 'CRM' },
+  { to: '/admin/finance-revenue', label: 'Revenue', group: 'Finance' },
+  { to: '/admin/finance-expense', label: 'Expenses', group: 'Finance' },
+  { to: '/admin/finance-profit', label: 'Profit', group: 'Finance' },
+  { to: '/admin/hr-employees', label: 'Employee information', group: 'HR' },
+  { to: '/admin/hr-org', label: 'Departments', group: 'HR' },
+  { to: '/admin/hr-schedules', label: 'Schedules', group: 'HR' },
+  { to: '/admin/hr-payroll', label: 'Payroll', group: 'HR' },
+  { to: '/admin/hr-leaves', label: 'Leaves', group: 'HR' },
+  { to: '/admin/maintenance-requests', label: 'Requests', group: 'Maintenance' },
+  { to: '/admin/maintenance-schedule', label: 'Schedule', group: 'Maintenance' },
+  { to: '/admin/maintenance-inventory', label: 'Inventory', group: 'Maintenance' },
+  { to: '/admin/reports', label: 'Reports', group: 'Analytics' },
+  { to: '/admin/analytics-kpi', label: 'KPIs', group: 'Analytics' },
+  { to: '/admin/users', label: 'Users', group: 'Admin' },
+  { to: '/admin/audit-log', label: 'Audit log', group: 'Admin' },
+  { to: '/admin/login-activity', label: 'Login activity', group: 'Admin' },
 ]
 
-const quickLinkRows = computed(() => {
-  const mid = Math.ceil(quickLinks.length / 2)
-  return [quickLinks.slice(0, mid), quickLinks.slice(mid)]
+const visibleQuickLinks = computed(() => quickLinks.filter((item) => canAccess(item.to)))
+const compactQuickLinks = computed(() => roleLevel.value < 2)
+const quickLinkGroups = computed(() => {
+  const groups = []
+  const index = new Map()
+  for (const link of visibleQuickLinks.value) {
+    const name = link.group || 'More'
+    if (!index.has(name)) {
+      index.set(name, groups.length)
+      groups.push({ name, hint: GROUP_HINTS[name] || '', links: [] })
+    }
+    groups[index.get(name)].links.push(link)
+  }
+  for (const group of groups) {
+    if (group.name === 'Admin' && !group.links.some((link) => link.to === '/admin/users')) {
+      group.hint = 'Activity logs'
+    }
+  }
+  return groups
 })
 
 const counts = computed(() => {
@@ -222,13 +258,18 @@ const statusBars = computed(() => {
 const totalRevenue = computed(() => {
   return bookings.value
     .filter((b) => b.status === 'confirmed' || b.status === 'in_house' || b.status === 'completed')
-    .reduce((sum, b) => sum + Number(b.total_price || 0), 0)
+    .reduce((sum, b) => sum + roomCollected(b), 0)
 })
 
 const roomCounts = computed(() => {
-  const total = rooms.value.length
-  const available = rooms.value.filter((r) => r.status === 'available').length
-  return { total, available }
+  const count = (status) => rooms.value.filter((r) => r.ops_status === status).length
+  return {
+    total: rooms.value.length,
+    clean: count('clean'),
+    dirty: count('dirty'),
+    occupied: count('occupied'),
+    out_of_order: count('out_of_order'),
+  }
 })
 
 const recentBookings = computed(() => bookings.value.slice(0, 5))
