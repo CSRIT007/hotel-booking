@@ -111,6 +111,9 @@
           <router-link to="/contact" class="rounded-full border border-stone-300 px-6 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-50">
             Contact us
           </router-link>
+          <router-link to="/policies" class="rounded-full border border-stone-300 px-6 py-3 text-sm font-semibold text-stone-700 hover:bg-stone-50">
+            Stay policies
+          </router-link>
         </div>
       </div>
     </section>

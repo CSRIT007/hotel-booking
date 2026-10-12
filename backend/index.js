@@ -13,6 +13,7 @@ import { dirname, join } from 'path'
 import { readFileSync, existsSync, mkdirSync, readdirSync } from 'fs'
 import crypto from 'crypto'
 import multer from 'multer'
+import { sendStayEmail } from './mail.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -828,12 +829,16 @@ app.get('/api/bookings', async (req, res) => {
   try {
     const userId = req.query.user_id
     if (userId) {
+      const actor = parseInt(req.get('x-user-id') || 0, 10)
+      if (!isHotelStaff(requestRole(req)) && actor !== parseInt(userId, 10)) {
+        return res.status(403).json({ error: 'You can only view your own bookings.' })
+      }
       const r = await pool.query(
         `SELECT b.id, b.user_id, b.room_id,
                 to_char(b.check_in, 'YYYY-MM-DD') AS check_in,
                 to_char(b.check_out, 'YYYY-MM-DD') AS check_out,
                 b.guests, b.total_price, b.status, b.invoice_no, b.created_at,
-                r.name AS room_name, r.image AS room_image,
+                r.name AS room_name, r.image AS room_image, r.max_persons,
                 h.name AS hotel_name, c.name AS channel_name, c.code AS channel_code
          FROM bookings b
          JOIN rooms r ON b.room_id = r.id
@@ -870,12 +875,31 @@ app.get('/api/bookings', async (req, res) => {
 })
 
 app.patch('/api/bookings/:id', async (req, res) => {
-  if (!requireStaff(req, res)) return
   try {
     const body = req.body || {}
     const currentQ = await pool.query('SELECT * FROM bookings WHERE id = $1', [req.params.id])
     const current = currentQ.rows[0]
     if (!current) return res.status(404).json({ error: 'Booking not found' })
+
+    const isStaff = isHotelStaff(requestRole(req))
+    const actor = parseInt(req.get('x-user-id') || 0, 10)
+    if (!isStaff) {
+      if (!actor || Number(current.user_id) !== actor) {
+        return res.status(403).json({ error: 'You can only change your own booking.' })
+      }
+      if (!['pending', 'confirmed'].includes(current.status)) {
+        return res.status(400).json({ error: 'This stay can no longer be changed online.' })
+      }
+      if (current.status === 'confirmed' && toYmd(current.check_in) <= ymd(new Date())) {
+        return res.status(400).json({ error: 'Contact the desk to change a stay that starts today or has started.' })
+      }
+      if (body.room_id != null && Number(body.room_id) !== Number(current.room_id)) {
+        return res.status(400).json({ error: 'Ask the desk to move you to another room.' })
+      }
+      if (body.status != null && String(body.status) !== current.status && String(body.status) !== 'cancelled') {
+        return res.status(403).json({ error: 'Staff confirm bookings.' })
+      }
+    }
 
     const nextStatus = body.status != null ? String(body.status) : current.status
     if (!BOOKING_STATUSES.includes(nextStatus)) {
@@ -906,6 +930,9 @@ app.patch('/api/bookings/:id', async (req, res) => {
     if (datesChanged && !['pending', 'confirmed', 'in_house'].includes(current.status)) {
       return res.status(400).json({ error: 'Only pending, confirmed, or in-house stays can change dates.' })
     }
+    if (!isStaff && datesChanged && nextIn < ymd(new Date())) {
+      return res.status(400).json({ error: 'Check-in cannot be in the past.' })
+    }
 
     let booking
     if (datesChanged) {
@@ -935,14 +962,16 @@ app.patch('/api/bookings/:id', async (req, res) => {
       booking = r.rows[0]
     }
 
+    let mail = null
     if (nextStatus !== current.status) {
-      await applyBookingStatusEffects(booking, nextStatus)
+      mail = await applyBookingStatusEffects(booking, nextStatus)
     } else if (datesChanged) {
       if (Number(nextRoomId) !== Number(current.room_id)) {
         await syncRoomHold(current.room_id)
       }
       await syncRoomHold(booking.room_id)
       if (booking.status === 'in_house') await ensureRoomCharge(booking)
+      mail = await notifyGuestStay(booking, 'changed')
     }
 
     await writeAudit(req, {
@@ -953,7 +982,7 @@ app.patch('/api/bookings/:id', async (req, res) => {
         ? `Booking #${booking.id} dates ${nextIn} → ${nextOut}`
         : `Booking #${booking.id} marked ${nextStatus}`,
     })
-    res.json(booking)
+    res.json(mail ? { ...booking, mail } : booking)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -962,22 +991,49 @@ app.patch('/api/bookings/:id', async (req, res) => {
 app.post('/api/bookings', async (req, res) => {
   try {
     const isStaff = isHotelStaff(requestRole(req))
-    const { user_id, room_id, check_in, check_out, guests, status, channel_id, walk_in_name, walk_in_email } = req.body || {}
+    const {
+      user_id,
+      room_id,
+      check_in,
+      check_out,
+      guests,
+      status,
+      channel_id,
+      walk_in_name,
+      walk_in_email,
+      guest_name,
+      guest_email,
+      guest_phone,
+      guest_password,
+    } = req.body || {}
     if (!room_id || !check_in || !check_out) {
       return res.status(400).json({ error: 'Missing required booking fields.' })
     }
 
     let userId = parseInt(user_id, 10) || 0
+    let publicUser = null
+    const actor = parseInt(req.get('x-user-id') || 0, 10)
     if (isStaff && String(walk_in_name || '').trim()) {
       const walkIn = await findOrCreateWalkIn(walk_in_name, walk_in_email)
       if (walkIn.error) return res.status(400).json({ error: walkIn.error })
       userId = walkIn.userId
+    } else if (!isStaff && !actor) {
+      const guest = await resolvePublicGuest({
+        name: guest_name,
+        email: guest_email,
+        phone: guest_phone,
+        password: guest_password,
+      })
+      if (guest.error) return res.status(400).json({ error: guest.error })
+      userId = guest.userId
+      publicUser = guest.signedIn ? guest.user : null
+    } else if (!isStaff && actor) {
+      userId = actor
     }
     if (!userId) {
       return res.status(400).json({ error: 'Select a guest or enter a walk-in name.' })
     }
     if (!isStaff) {
-      const actor = parseInt(req.get('x-user-id') || 0, 10)
       if (actor && actor !== userId) {
         return res.status(403).json({ error: 'You can only book for your own account.' })
       }
@@ -1011,8 +1067,9 @@ app.post('/api/bookings', async (req, res) => {
     })
     if (locked.error) return res.status(locked.status || 400).json({ error: locked.error })
     const created = locked.created
+    let mail = null
     if (nextStatus === 'confirmed') {
-      await applyBookingStatusEffects(created, 'confirmed')
+      mail = await applyBookingStatusEffects(created, 'confirmed')
     }
     await writeAudit(req, {
       action: 'create',
@@ -1020,7 +1077,8 @@ app.post('/api/bookings', async (req, res) => {
       entityId: created.id,
       summary: nextStatus === 'confirmed' ? `Staff booking #${created.id}` : `Booking request #${created.id}`,
     })
-    res.status(201).json(created)
+    const payload = mail ? { ...created, mail } : created
+    res.status(201).json(publicUser ? { ...payload, user: publicUser } : payload)
   } catch (e) {
     res.status(500).json({ error: e.message || 'Booking failed' })
   }
@@ -2032,12 +2090,16 @@ async function ensureGuestTables() {
       id SERIAL PRIMARY KEY,
       user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       booking_id INT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-      type VARCHAR(20) NOT NULL CHECK (type IN ('confirmed', 'cancelled')),
+      type VARCHAR(20) NOT NULL CHECK (type IN ('confirmed', 'cancelled', 'changed')),
       message TEXT NOT NULL,
       is_read SMALLINT DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     )
   `)
+  await pool.query(`ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check`)
+  await pool.query(
+    `ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (type IN ('confirmed', 'cancelled', 'changed'))`
+  )
 }
 
 async function ensureUserSecurity() {
@@ -3497,7 +3559,10 @@ async function findOrCreateWalkIn(name, email) {
   const cleanEmail = String(email || '').trim().toLowerCase()
   if (cleanEmail) {
     const exist = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [cleanEmail])
-    if (exist.rows[0]) return { userId: exist.rows[0].id }
+    if (exist.rows[0]) {
+      await syncGuestIdentity(exist.rows[0].id, { full_name: display })
+      return { userId: exist.rows[0].id }
+    }
   }
   const base = display.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 16) || 'walkin'
   let username = base
@@ -3517,7 +3582,88 @@ async function findOrCreateWalkIn(name, email) {
     [username, nextEmail, hash]
   )
   await ensureGuestProfile(created.rows[0].id)
+  await syncGuestIdentity(created.rows[0].id, { full_name: display })
   return { userId: created.rows[0].id }
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim())
+}
+
+function phoneDigits(value) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+async function uniqueUsernameFrom(value) {
+  const base = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 16) || 'guest'
+  let username = base
+  let n = 1
+  while (true) {
+    const taken = await pool.query('SELECT id FROM users WHERE username = $1 LIMIT 1', [username])
+    if (!taken.rows[0]) return username
+    n += 1
+    username = `${base}${n}`.slice(0, 50)
+  }
+}
+
+async function resolvePublicGuest({ name, email, phone, password }) {
+  const display = String(name || '').trim()
+  const cleanEmail = String(email || '').trim().toLowerCase()
+  const cleanPhone = String(phone || '').trim()
+  if (!display) return { error: 'Enter your name.' }
+  if (!isValidEmail(cleanEmail)) return { error: 'Enter a valid email.' }
+  if (phoneDigits(cleanPhone).length < 6) return { error: 'Enter a phone number.' }
+
+  const exist = await pool.query(
+    'SELECT id, username, email, password, role FROM users WHERE email = $1 LIMIT 1',
+    [cleanEmail]
+  )
+  const row = exist.rows[0]
+  if (row) {
+    if (isHotelStaff(row.role)) {
+      return { error: 'Use a personal email, not a staff account.' }
+    }
+    if (!password) {
+      return { error: 'An account with this email already exists. Enter your password, or log in.' }
+    }
+    let passwordOk = false
+    try {
+      passwordOk = await bcrypt.compare(password, row.password)
+    } catch {
+      passwordOk = false
+    }
+    if (!passwordOk) {
+      return { error: 'That password does not match this email. Log in, or use a different email.' }
+    }
+    await syncGuestIdentity(row.id, { full_name: display, phone: cleanPhone })
+    return {
+      userId: row.id,
+      signedIn: true,
+      user: { id: row.id, username: row.username, email: row.email, role: row.role || 'guest' },
+    }
+  }
+
+  if (password && !isPasswordStrong(password)) {
+    return { error: `Password must be at least ${PASSWORD_MIN} characters.` }
+  }
+  const username = await uniqueUsernameFrom(display || cleanEmail.split('@')[0])
+  const hash = await bcrypt.hash(password || crypto.randomBytes(12).toString('hex'), 10)
+  const created = await pool.query(
+    `INSERT INTO users (username, email, password, role) VALUES ($1, $2, $3, 'guest') RETURNING id, username, email, role`,
+    [username, cleanEmail, hash]
+  )
+  const u = created.rows[0]
+  await ensureGuestProfile(u.id)
+  await syncGuestIdentity(u.id, { full_name: display, phone: cleanPhone })
+  const signedIn = Boolean(password)
+  return {
+    userId: u.id,
+    signedIn,
+    user: signedIn ? { id: u.id, username: u.username, email: u.email, role: u.role || 'guest' } : null,
+  }
 }
 
 async function syncRoomHold(roomId) {
@@ -3532,26 +3678,51 @@ async function syncRoomHold(roomId) {
   await releaseRoomIfReady(roomId)
 }
 
+async function notifyGuestStay(booking, type) {
+  const details = await pool.query(
+    `SELECT r.name AS room_name, h.name AS hotel_name,
+            u.email, u.username, p.full_name
+     FROM rooms r
+     JOIN hotels h ON r.hotel_id = h.id
+     JOIN users u ON u.id = $2
+     LEFT JOIN guest_profiles p ON p.user_id = u.id
+     WHERE r.id = $1`,
+    [booking.room_id, booking.user_id]
+  )
+  const row = details.rows[0] || {}
+  const roomName = row.room_name || 'your room'
+  const hotelName = row.hotel_name || ''
+  const guestName = row.full_name || row.username || 'Guest'
+  const checkIn = toYmd(booking.check_in)
+  const checkOut = toYmd(booking.check_out)
+  const message =
+    type === 'cancelled'
+      ? `Your booking for ${roomName} has been cancelled.`
+      : type === 'changed'
+        ? `Your dates for ${roomName} are now ${checkIn} to ${checkOut}.`
+        : `Your booking for ${roomName}${hotelName ? ` at ${hotelName}` : ''} is confirmed and ready.`
+  await pool.query(
+    `INSERT INTO notifications (user_id, booking_id, type, message, is_read)
+     VALUES ($1, $2, $3, $4, 0)`,
+    [booking.user_id, booking.id, type, message]
+  )
+  return sendStayEmail(type, {
+    id: booking.id,
+    email: row.email,
+    guestName,
+    hotelName,
+    roomName,
+    checkIn,
+    checkOut,
+    guests: booking.guests,
+    total: booking.total_price,
+  })
+}
+
 async function applyBookingStatusEffects(booking, status) {
+  let mail = null
   if (status === 'confirmed' || status === 'cancelled') {
-    const details = await pool.query(
-      `SELECT r.name AS room_name, h.name AS hotel_name
-       FROM rooms r
-       JOIN hotels h ON r.hotel_id = h.id
-       WHERE r.id = $1`,
-      [booking.room_id]
-    )
-    const roomName = details.rows[0]?.room_name || 'your room'
-    const hotelName = details.rows[0]?.hotel_name || ''
-    const message =
-      status === 'confirmed'
-        ? `Your booking for ${roomName}${hotelName ? ` at ${hotelName}` : ''} is confirmed and ready.`
-        : `Your booking for ${roomName} has been cancelled.`
-    await pool.query(
-      `INSERT INTO notifications (user_id, booking_id, type, message, is_read)
-       VALUES ($1, $2, $3, $4, 0)`,
-      [booking.user_id, booking.id, status, message]
-    )
+    mail = await notifyGuestStay(booking, status)
   }
 
   if (status === 'confirmed' || status === 'in_house') {
@@ -3563,6 +3734,7 @@ async function applyBookingStatusEffects(booking, status) {
   } else if (status === 'cancelled' || status === 'no_show') {
     await syncRoomHold(booking.room_id)
   }
+  return mail
 }
 
 function ymd(d) {

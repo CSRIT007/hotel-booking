@@ -1,8 +1,25 @@
 <template>
   <div>
-    <HeroSlideshow :slides="slides" />
+    <div class="relative">
+      <HeroSlideshow :slides="slides" />
+      <div class="relative z-20 px-4 py-4 sm:absolute sm:inset-x-0 sm:bottom-0 sm:translate-y-1/2 sm:py-0">
+        <div class="mx-auto max-w-5xl">
+          <AvailabilitySearch
+            v-model:check-in="checkIn"
+            v-model:check-out="checkOut"
+            v-model:guests="guests"
+            v-model:hotel-id="hotelId"
+            :hotels="hotels"
+            :min-date="today"
+            :error="searchError"
+            submit-label="Check availability"
+            @submit="searchStay"
+          />
+        </div>
+      </div>
+    </div>
 
-    <section class="py-16 sm:py-24">
+    <section class="py-16 sm:py-24 sm:pt-28">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
         <div class="mx-auto max-w-2xl text-center">
           <p class="text-sm font-medium uppercase tracking-widest text-brand-600">Stay with us</p>
@@ -23,7 +40,7 @@
               <p class="mt-1 text-sm text-stone-500">{{ hotel.location }}</p>
               <p class="mt-3 text-sm leading-relaxed text-stone-600">{{ hotel.description }}</p>
               <router-link
-                :to="{ name: 'Rooms', query: { hotel: hotel.id } }"
+                :to="{ name: 'Rooms', query: stayQuery({ hotel: hotel.id }) }"
                 class="mt-5 inline-flex items-center text-sm font-semibold text-brand-700 hover:text-brand-800"
               >
                 View rooms
@@ -62,7 +79,7 @@
               <p class="text-sm text-stone-500">{{ room.hotel_name }}</p>
               <p class="mt-2 text-sm text-stone-600">{{ room.max_persons }} guests · {{ room.size }} · {{ room.view_type }}</p>
               <router-link
-                :to="{ name: 'RoomDetail', params: { id: room.id } }"
+                :to="{ name: 'RoomDetail', params: { id: room.id }, query: stayQuery() }"
                 class="mt-4 inline-flex text-sm font-semibold text-brand-700 hover:text-brand-800"
               >
                 View details →
@@ -96,19 +113,61 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import HeroSlideshow from '../components/HeroSlideshow.vue'
+import AvailabilitySearch from '../components/AvailabilitySearch.vue'
 import { getHotels, getRooms, getSlides, getTestimonials } from '../services/data'
 import { formatMoney } from '../utils/money'
 import { roomCover, onRoomPhotoError } from '../constants/media'
 
+const router = useRouter()
 const hotels = ref([])
 const rooms = ref([])
 const testimonials = ref([])
 const slides = ref([])
+const searchError = ref('')
+
+function localYmd(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function addDays(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  return localYmd(dt)
+}
+
+const today = localYmd()
+const checkIn = ref(today)
+const checkOut = ref(addDays(today, 1))
+const guests = ref(2)
+const hotelId = ref('')
 
 const featuredRooms = computed(() =>
   rooms.value.filter((r) => r.status !== 'maintenance').slice(0, 4)
 )
+
+function stayQuery(extra = {}) {
+  const query = { ...extra }
+  if (checkIn.value) query.check_in = checkIn.value
+  if (checkOut.value) query.check_out = checkOut.value
+  if (guests.value) query.guests = String(guests.value)
+  if (hotelId.value && query.hotel == null) query.hotel = hotelId.value
+  return query
+}
+
+function searchStay() {
+  searchError.value = ''
+  if (!checkIn.value || !checkOut.value) {
+    searchError.value = 'Choose check-in and check-out dates.'
+    return
+  }
+  if (checkOut.value <= checkIn.value) {
+    searchError.value = 'Check-out must be after check-in.'
+    return
+  }
+  router.push({ name: 'Rooms', query: stayQuery() })
+}
 
 onMounted(async () => {
   hotels.value = await getHotels()

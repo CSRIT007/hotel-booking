@@ -10,23 +10,19 @@
 
     <section class="py-14 sm:py-20">
       <div class="mx-auto max-w-6xl px-4 sm:px-6">
-        <form class="mb-8 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm" @submit.prevent="applyDates">
-          <div>
-            <label class="block text-xs font-medium text-stone-700">Check-in</label>
-            <input v-model="checkIn" type="date" class="mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-stone-700">Check-out</label>
-            <input v-model="checkOut" type="date" class="mt-1 rounded-lg border border-stone-300 px-3 py-2 text-sm" />
-          </div>
-          <button type="submit" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
-            Show open rooms
-          </button>
-          <button v-if="checkIn || checkOut" type="button" class="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-700" @click="clearDates">
-            Clear dates
-          </button>
-        </form>
-        <p v-if="dateError" class="mb-4 text-sm text-red-600">{{ dateError }}</p>
+        <AvailabilitySearch
+          class="mb-8"
+          variant="page"
+          v-model:check-in="checkIn"
+          v-model:check-out="checkOut"
+          v-model:guests="guests"
+          :min-date="today"
+          :error="dateError"
+          submit-label="Show open rooms"
+          show-clear
+          @submit="applyDates"
+          @clear="clearDates"
+        />
         <div class="grid gap-8 md:grid-cols-2">
           <article
             v-for="room in rooms"
@@ -61,7 +57,7 @@
           </article>
         </div>
         <p v-if="rooms.length === 0 && !loading" class="text-center text-stone-500">
-          {{ checkIn && checkOut ? 'No rooms are open for those dates.' : 'No rooms found.' }}
+          {{ emptyMessage }}
         </p>
         <p v-if="loading" class="text-center text-stone-500">Loading rooms…</p>
       </div>
@@ -70,30 +66,56 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getRooms } from '../services/data'
 import { formatMoney } from '../utils/money'
 import PageHero from '../components/PageHero.vue'
+import AvailabilitySearch from '../components/AvailabilitySearch.vue'
 
 const route = useRoute()
+const router = useRouter()
 const rooms = ref([])
 const loading = ref(true)
-const checkIn = ref(typeof route.query.check_in === 'string' ? route.query.check_in : '')
-const checkOut = ref(typeof route.query.check_out === 'string' ? route.query.check_out : '')
 const dateError = ref('')
+
+function localYmd(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const today = localYmd()
+const checkIn = ref('')
+const checkOut = ref('')
+const guests = ref(2)
+
+function queryGuests() {
+  const n = Number(route.query.guests)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+function syncFromRoute() {
+  checkIn.value = typeof route.query.check_in === 'string' ? route.query.check_in : ''
+  checkOut.value = typeof route.query.check_out === 'string' ? route.query.check_out : ''
+  guests.value = queryGuests() || 2
+}
 
 function stayQuery() {
   const query = {}
   if (route.query.hotel) query.hotel = route.query.hotel
   if (checkIn.value) query.check_in = checkIn.value
   if (checkOut.value) query.check_out = checkOut.value
+  if (guests.value) query.guests = String(guests.value)
   return query
 }
 
 function roomLink(room) {
   return { name: 'RoomDetail', params: { id: room.id }, query: stayQuery() }
 }
+
+const emptyMessage = computed(() => {
+  if (checkIn.value && checkOut.value) return 'No rooms are open for those dates and guest count.'
+  return 'No rooms found.'
+})
 
 async function load() {
   loading.value = true
@@ -110,21 +132,36 @@ async function load() {
     params.check_in = checkIn.value
     params.check_out = checkOut.value
   }
-  rooms.value = await getRooms(params)
-  rooms.value = rooms.value.filter((r) => r.status !== 'maintenance')
+  let list = await getRooms(params)
+  list = list.filter((r) => r.status !== 'maintenance')
+  const party = queryGuests()
+  if (party > 0) {
+    list = list.filter((r) => Number(r.max_persons || 0) >= party)
+  }
+  rooms.value = list
   loading.value = false
 }
 
 function applyDates() {
-  load()
+  if (checkIn.value && checkOut.value && checkOut.value <= checkIn.value) {
+    dateError.value = 'Check-out must be after check-in.'
+    return
+  }
+  router.replace({ name: 'Rooms', query: stayQuery() })
 }
 
 function clearDates() {
-  checkIn.value = ''
-  checkOut.value = ''
-  load()
+  const query = {}
+  if (route.query.hotel) query.hotel = route.query.hotel
+  router.replace({ name: 'Rooms', query })
 }
 
-onMounted(load)
-watch(() => route.query.hotel, load)
+watch(
+  () => [route.query.check_in, route.query.check_out, route.query.guests, route.query.hotel],
+  () => {
+    syncFromRoute()
+    load()
+  },
+  { immediate: true }
+)
 </script>

@@ -44,7 +44,7 @@
       </div>
     </div>
 
-    <div v-if="slides.length > 1" class="absolute bottom-8 left-0 right-0 z-10 flex items-center justify-center gap-3">
+    <div v-if="slides.length > 1" class="absolute bottom-6 left-4 z-10 flex items-center gap-3 sm:bottom-24 sm:left-6">
       <button type="button" class="rounded-full bg-white/15 px-3 py-1 text-white hover:bg-white/25" aria-label="Previous slide" @click="prev">‹</button>
       <button
         v-for="(slide, i) in slides"

@@ -52,7 +52,7 @@
           <div class="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-stone-200">
             <h3 class="font-display text-lg font-semibold text-stone-800">Who can help</h3>
             <ul class="mt-4 space-y-3 text-sm text-stone-600">
-              <li><span class="font-medium text-stone-800">Reservations</span> — new stays, date changes, and cancellations</li>
+              <li><span class="font-medium text-stone-800">Reservations</span> — new stays, date changes, and cancellations (see <router-link to="/policies#cancellation" class="text-brand-700 hover:underline">cancellation policy</router-link>)</li>
               <li><span class="font-medium text-stone-800">Front desk</span> — arrival time, late check-in, and directions</li>
               <li><span class="font-medium text-stone-800">Housekeeping</span> — extra linen, stay-over clean, or a room note</li>
               <li><span class="font-medium text-stone-800">Maintenance</span> — something in the room that needs repair</li>
@@ -77,6 +77,7 @@
               <option value="">________Selection________</option>
               <option>New booking</option>
               <option>Change dates</option>
+              <option>Cancel a booking</option>
               <option>Arrival time</option>
               <option>Room question</option>
               <option>Other</option>

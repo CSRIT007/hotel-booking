@@ -48,6 +48,13 @@
         </div>
         <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
         <p v-if="success" class="text-sm text-green-600">{{ success }}</p>
+        <p class="text-xs leading-relaxed text-stone-500">
+          By creating an account you agree to our
+          <router-link to="/policies" class="text-brand-600 hover:underline">stay policies</router-link>
+          and
+          <router-link :to="{ name: 'Policies', hash: '#privacy' }" class="text-brand-600 hover:underline">privacy</router-link>
+          notes.
+        </p>
         <button
           type="submit"
           :disabled="loading"

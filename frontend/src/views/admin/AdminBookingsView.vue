@@ -2,6 +2,7 @@
   <div>
     <p class="text-sm text-stone-600">
       Create a stay, take cash / bank / card (including a deposit), post charges, collect the balance at check-out, then issue the invoice.
+      Confirming or cancelling a request emails the guest when they have a real address.
     </p>
 
     <form class="mt-5 rounded-xl border border-stone-200 bg-white p-5 shadow-sm" @submit.prevent="save">
@@ -850,8 +851,8 @@ async function save() {
       } else {
         payload.user_id = form.user_id
       }
-      await createBooking(payload)
-      success.value = 'Booking saved. Those dates cannot be sold again.'
+      const created = await createBooking(payload)
+      success.value = mailNote(created?.mail, 'Booking saved. Those dates cannot be sold again')
       resetForm()
     }
     await load()
@@ -861,9 +862,24 @@ async function save() {
   saving.value = false
 }
 
+function mailNote(mail, lead) {
+  if (!mail) return `${lead}.`
+  if (mail.sent) return `${lead}. Email sent to ${mail.to}.`
+  if (mail.skipped) return `${lead}. No guest email to send.`
+  if (mail.stored && !mail.sent) {
+    return `${lead}. Guest notice saved. A confirmation copy was written for ${mail.to} (SMTP is not set yet).`
+  }
+  return `${lead}. ${mail.reason || 'Email was not sent.'}`
+}
+
 async function updateStatus(id, status) {
   try {
-    await updateBooking(id, { status })
+    const updated = await updateBooking(id, { status })
+    const lead =
+      status === 'confirmed' ? 'Booking confirmed'
+        : status === 'cancelled' ? 'Booking cancelled'
+          : 'Booking updated'
+    success.value = mailNote(updated?.mail, lead)
     await load()
   } catch (e) {
     alert(e.message || 'Update failed')

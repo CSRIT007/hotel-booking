@@ -54,7 +54,7 @@
               {{ formatMoney(room.from_price ?? room.price) }}
               <span class="text-base font-normal text-stone-500">per night</span>
             </p>
-            <form v-if="isLoggedIn" class="mt-6 space-y-4" @submit.prevent="submitBooking">
+            <form class="mt-6 space-y-4" @submit.prevent="submitBooking">
               <div>
                 <label class="block text-sm font-medium text-stone-700">Check-in</label>
                 <input
@@ -82,6 +82,63 @@
                   <option v-for="n in room.max_persons" :key="n" :value="n">{{ n }}</option>
                 </select>
               </div>
+              <template v-if="!isLoggedIn">
+                <div>
+                  <label class="block text-sm font-medium text-stone-700">Full name</label>
+                  <input
+                    v-model="guest.name"
+                    type="text"
+                    required
+                    autocomplete="name"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-stone-700">Email</label>
+                  <input
+                    v-model="guest.email"
+                    type="email"
+                    required
+                    autocomplete="email"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-stone-700">Phone</label>
+                  <input
+                    v-model="guest.phone"
+                    type="tel"
+                    required
+                    autocomplete="tel"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-stone-700">Password <span class="font-normal text-stone-500">(optional)</span></label>
+                  <input
+                    v-model="guest.password"
+                    type="password"
+                    autocomplete="new-password"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                  <p class="mt-0.5 text-xs text-stone-500">
+                    Set one to track this booking, or enter your existing password if you already have an account.
+                  </p>
+                </div>
+                <div v-if="guest.password">
+                  <label class="block text-sm font-medium text-stone-700">Confirm password</label>
+                  <input
+                    v-model="guest.confirmPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <p class="text-xs text-stone-500">
+                  Already have an account?
+                  <router-link :to="{ name: 'Login', query: { redirect: route.fullPath } }" class="text-brand-600 hover:underline">Log in</router-link>
+                </p>
+              </template>
               <p v-if="quoteError" class="text-sm text-red-600">{{ quoteError }}</p>
               <p v-else-if="quoteLoading" class="text-sm text-stone-500">Checking rates and availability…</p>
               <div v-else-if="quote" class="space-y-1">
@@ -97,7 +154,7 @@
               <p v-if="bookingError" class="text-sm text-red-600">{{ bookingError }}</p>
               <p v-if="bookingSuccess" class="text-sm text-green-600">{{ bookingSuccess }}</p>
               <router-link
-                v-if="bookingSuccess"
+                v-if="bookingSuccess && isLoggedIn"
                 to="/my-bookings"
                 class="mt-1 inline-block text-sm font-medium text-brand-600 hover:underline"
               >
@@ -110,10 +167,12 @@
               >
                 {{ bookingLoading ? 'Booking…' : 'Request booking' }}
               </button>
+              <p class="text-xs leading-relaxed text-stone-500">
+                This request stays pending until the desk confirms.
+                Check-in from 2:00 pm, check-out until 12:00 pm.
+                <router-link to="/policies" class="text-brand-600 hover:underline">Stay policies</router-link>
+              </p>
             </form>
-            <div v-else class="mt-6 rounded-lg bg-stone-100 p-4 text-center text-stone-600">
-              <p>Please <router-link to="/login" class="text-brand-600 hover:underline">log in</router-link> to book this room.</p>
-            </div>
           </div>
         </div>
       </div>
@@ -133,7 +192,7 @@ import { getRoom, createBooking, getCrsQuote } from '../services/data'
 import { formatMoney } from '../utils/money'
 
 const route = useRoute()
-const { isLoggedIn, currentUser } = useAuth()
+const { isLoggedIn, currentUser, setUser } = useAuth()
 const loading = ref(true)
 const room = ref(null)
 const activePhoto = ref(0)
@@ -141,6 +200,13 @@ const form = ref({
   check_in: '',
   check_out: '',
   guests: 1,
+})
+const guest = ref({
+  name: '',
+  email: '',
+  phone: '',
+  password: '',
+  confirmPassword: '',
 })
 const bookingError = ref('')
 const bookingSuccess = ref('')
@@ -163,9 +229,13 @@ async function loadRoom() {
   room.value = null
   room.value = await getRoom(route.params.id)
   activePhoto.value = 0
-  if (room.value) form.value.guests = Math.min(form.value.guests, room.value.max_persons)
   if (typeof route.query.check_in === 'string') form.value.check_in = route.query.check_in
   if (typeof route.query.check_out === 'string') form.value.check_out = route.query.check_out
+  if (typeof route.query.guests === 'string') {
+    const n = Number(route.query.guests)
+    if (Number.isFinite(n) && n > 0) form.value.guests = n
+  }
+  if (room.value) form.value.guests = Math.min(Math.max(1, form.value.guests), room.value.max_persons)
   loading.value = false
 }
 
@@ -199,18 +269,54 @@ async function submitBooking() {
     bookingError.value = 'Wait for the rate and availability check before booking.'
     return
   }
+  if (!isLoggedIn.value) {
+    if (!guest.value.name.trim() || !guest.value.email.trim() || !guest.value.phone.trim()) {
+      bookingError.value = 'Enter your name, email, and phone.'
+      return
+    }
+    if (guest.value.password) {
+      if (guest.value.password.length < 8) {
+        bookingError.value = 'Password must be at least 8 characters.'
+        return
+      }
+      if (guest.value.password !== guest.value.confirmPassword) {
+        bookingError.value = 'Passwords do not match.'
+        return
+      }
+    }
+  }
   bookingLoading.value = true
   try {
-    await createBooking({
-      user_id: currentUser.value.id,
+    const payload = {
       room_id: room.value.id,
       check_in: checkIn,
       check_out: checkOut,
       guests: form.value.guests,
       total_price: totalPrice.value,
       status: 'pending',
-    })
-    bookingSuccess.value = 'Booking request sent. Check My bookings for status — we will update it when it is confirmed and ready.'
+    }
+    if (isLoggedIn.value) {
+      payload.user_id = currentUser.value.id
+    } else {
+      payload.guest_name = guest.value.name.trim()
+      payload.guest_email = guest.value.email.trim()
+      payload.guest_phone = guest.value.phone.trim()
+      if (guest.value.password) payload.guest_password = guest.value.password
+    }
+    const created = await createBooking(payload)
+    if (created?.user) {
+      setUser({
+        id: created.user.id,
+        username: created.user.username,
+        email: created.user.email,
+        role: created.user.role || 'guest',
+      })
+    }
+    if (created?.user || isLoggedIn.value) {
+      bookingSuccess.value = `Booking request #${created.id} sent. Check My bookings — we will update it when it is confirmed.`
+    } else {
+      bookingSuccess.value = `Booking request #${created.id} sent. We will confirm by email at ${guest.value.email.trim()}.`
+    }
   } catch (e) {
     bookingError.value = e.message || 'Booking failed.'
   }

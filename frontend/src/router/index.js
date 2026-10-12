@@ -11,6 +11,7 @@ const router = createRouter({
     { path: '/register', name: 'Register', component: () => import('../views/RegisterView.vue'), meta: { title: 'Register', guestOnly: true } },
     { path: '/contact', name: 'Contact', component: () => import('../views/ContactView.vue'), meta: { title: 'Contact' } },
     { path: '/about', name: 'About', component: () => import('../views/AboutView.vue'), meta: { title: 'About' } },
+    { path: '/policies', name: 'Policies', component: () => import('../views/PoliciesView.vue'), meta: { title: 'Policies' } },
     { path: '/services', name: 'Services', component: () => import('../views/ServicesView.vue'), meta: { title: 'Services' } },
     { path: '/my-bookings', name: 'MyBookings', component: () => import('../views/MyBookingsView.vue'), meta: { title: 'My bookings', requiresAuth: true } },
     { path: '/admin/login', name: 'AdminLogin', component: () => import('../views/AdminLoginView.vue'), meta: { title: 'Admin Login' } },
@@ -57,6 +58,13 @@ const router = createRouter({
     },
     { path: '/:pathMatch(.*)*', name: 'NotFound', component: () => import('../views/NotFoundView.vue'), meta: { title: 'Not found' } },
   ],
+  scrollBehavior(to, from, savedPosition) {
+    if (to.hash) {
+      return { el: to.hash, top: 88, behavior: 'smooth' }
+    }
+    if (savedPosition) return savedPosition
+    return { top: 0 }
+  },
 })
 
 router.beforeEach((to, _from, next) => {
