@@ -7,6 +7,9 @@
  * Expenses: all recorded expense rows
  * Profit  = recognized revenue − expenses
  */
+import { formatMoney } from '../utils/money'
+export { formatMoney }
+
 export const EXPENSE_CATEGORIES = [
   'Utilities',
   'Salaries',
@@ -21,8 +24,6 @@ export function toMoney(n) {
   const v = Number(n)
   return Number.isFinite(v) ? v : 0
 }
-
-export { formatMoney } from '../utils/money'
 
 export function monthKey(value) {
   if (!value) return 'Unknown'
@@ -213,3 +214,224 @@ export function monthlySeries({ bookings = [], transactions = [], expenses = [] 
       }
     })
 }
+
+export function posProductLabel(tx) {
+  return tx?.product_name || tx?.product_name_text || (tx?.product_id ? `Product #${tx.product_id}` : '—')
+}
+
+export function revenueStatementLines(summary = {}, { includeRoom = true, includePos = true } = {}) {
+  const scoped = scopedFinanceSummary(summary, { includeRoom, includePos })
+  const revenueLines = []
+  if (includeRoom) {
+    revenueLines.push({
+      kind: 'item',
+      label: 'Room folio collections',
+      value: formatMoney(scoped.roomRevenue),
+      indent: true,
+    })
+  }
+  if (includePos) {
+    revenueLines.push({
+      kind: 'item',
+      label: 'POS sales (paid)',
+      value: formatMoney(scoped.posRevenue),
+      indent: true,
+    })
+  }
+  const excluded = []
+  if (includeRoom) {
+    excluded.push(
+      { kind: 'item', label: 'Room folio outstanding', value: formatMoney(summary.roomOutstanding), indent: true },
+      { kind: 'item', label: 'Quoted room total', value: formatMoney(summary.roomQuoted), indent: true },
+    )
+  }
+  if (includePos) {
+    excluded.push({
+      kind: 'item',
+      label: 'Refunded POS (excluded)',
+      value: formatMoney(summary.refundedPosTotal),
+      indent: true,
+    })
+  }
+  excluded.push({
+    kind: 'item',
+    label: 'Pending bookings and POS',
+    value: formatMoney(summary.pendingRevenue),
+    indent: true,
+  })
+  const notes = []
+  if (includeRoom && includePos) {
+    notes.push(
+      `Room stays counted: ${summary.counts?.room || 0}. Paid POS sales: ${summary.counts?.pos || 0}. Room revenue is folio payments collected on confirmed, in-house, and completed stays — not the quoted booking total.`
+    )
+  } else if (includeRoom) {
+    notes.push(
+      `POS sales are hidden in this view. Room stays counted: ${summary.counts?.room || 0}. Room revenue is folio payments collected on confirmed, in-house, and completed stays — not the quoted booking total.`
+    )
+  } else {
+    notes.push(
+      `Room folio collections are hidden in this view. Paid POS sales counted: ${summary.counts?.pos || 0}. Refunded POS is excluded.`
+    )
+  }
+  return [
+    { kind: 'header', label: 'Revenue' },
+    ...revenueLines,
+    { kind: 'total', label: 'Total revenue', value: formatMoney(scoped.revenue) },
+    { kind: 'blank' },
+    { kind: 'header', label: 'Not recognized as revenue' },
+    ...excluded,
+    { kind: 'blank' },
+    { kind: 'note', label: notes.join(' ') },
+  ]
+}
+
+export function scopedFinanceSummary(summary = {}, { includeRoom = true, includePos = true } = {}) {
+  const roomRevenue = includeRoom ? toMoney(summary.roomRevenue) : 0
+  const posRevenue = includePos ? toMoney(summary.posRevenue) : 0
+  const revenue = roomRevenue + posRevenue
+  const expenseTotal = toMoney(summary.expenseTotal)
+  const profit = revenue - expenseTotal
+  return {
+    ...summary,
+    includeRoom,
+    includePos,
+    roomRevenue,
+    posRevenue,
+    revenue,
+    profit,
+    marginPercent: revenue > 0 ? (profit / revenue) * 100 : 0,
+    roomItems: includeRoom ? summary.roomItems || [] : [],
+    posItems: includePos ? summary.posItems || [] : [],
+    counts: {
+      ...(summary.counts || {}),
+      room: includeRoom ? summary.counts?.room || 0 : 0,
+      pos: includePos ? summary.counts?.pos || 0 : 0,
+    },
+  }
+}
+
+export function profitAndLossLines(summary = {}, expenseCategories = [], { includeRoom = true, includePos = true } = {}) {
+  const scoped = scopedFinanceSummary(summary, { includeRoom, includePos })
+  const revenueLines = []
+  if (includeRoom) {
+    revenueLines.push({
+      kind: 'item',
+      label: 'Room folio collections',
+      value: formatMoney(scoped.roomRevenue),
+      indent: true,
+    })
+  }
+  if (includePos) {
+    revenueLines.push({
+      kind: 'item',
+      label: 'POS sales (paid)',
+      value: formatMoney(scoped.posRevenue),
+      indent: true,
+    })
+  }
+  const expenseLines = expenseCategories.length
+    ? expenseCategories.map((row) => ({
+        kind: 'item',
+        label: row.name,
+        value: formatMoney(row.total),
+        indent: true,
+      }))
+    : [{ kind: 'item', label: 'No expenses recorded', value: formatMoney(0), indent: true }]
+  const notes = []
+  if (includeRoom && includePos) {
+    notes.push(
+      `Pending bookings/POS ${formatMoney(summary.pendingRevenue)} are not included until confirmed or paid. Refunded POS ${formatMoney(summary.refundedPosTotal)} is excluded. Room outstanding ${formatMoney(summary.roomOutstanding)} is not revenue until collected.`
+    )
+  } else if (includeRoom) {
+    notes.push(
+      `POS sales are hidden in this view. Room outstanding ${formatMoney(summary.roomOutstanding)} is not revenue until collected. Operating expenses are hotel-wide and not allocated by source.`
+    )
+  } else {
+    notes.push(
+      `Room folio collections are hidden in this view. Refunded POS ${formatMoney(summary.refundedPosTotal)} is excluded. Operating expenses are hotel-wide and not allocated by source.`
+    )
+  }
+  return [
+    { kind: 'header', label: 'Revenue' },
+    ...revenueLines,
+    { kind: 'total', label: 'Total revenue', value: formatMoney(scoped.revenue) },
+    { kind: 'blank' },
+    { kind: 'header', label: 'Operating expenses' },
+    ...expenseLines,
+    { kind: 'total', label: 'Total operating expenses', value: formatMoney(scoped.expenseTotal) },
+    { kind: 'blank' },
+    {
+      kind: 'total',
+      label: Number(scoped.profit) >= 0 ? 'Net profit' : 'Net loss',
+      value: formatMoney(scoped.profit),
+    },
+    { kind: 'item', label: 'Operating margin', value: `${Number(scoped.marginPercent || 0).toFixed(1)}%` },
+    { kind: 'blank' },
+    { kind: 'note', label: notes.join(' ') },
+  ]
+}
+
+export const roomRevenueExportColumns = [
+  { label: 'Date', value: (row) => formatDate(bookingFinanceDate(row)) },
+  { label: 'ID', value: (row) => row.id },
+  { label: 'Guest', value: (row) => row.username || row.email || '—' },
+  { label: 'Room', value: (row) => row.room_name || '—' },
+  { label: 'Status', key: 'status' },
+  { label: 'Quoted', value: (row) => formatMoney(row.total_price), align: 'right' },
+  { label: 'Collected', value: (row) => formatMoney(row.folio_payments), align: 'right' },
+]
+
+export const posRevenueExportColumns = [
+  { label: 'Date', value: (row) => formatDate(posFinanceDate(row)) },
+  { label: 'ID', value: (row) => row.id },
+  { label: 'Product', value: (row) => posProductLabel(row) },
+  { label: 'Category', value: (row) => row.category || '—' },
+  { label: 'Qty', value: (row) => row.quantity ?? 1, align: 'right' },
+  { label: 'Payment', value: (row) => String(row.payment_method || 'other').replaceAll('_', ' ') },
+  { label: 'Status', key: 'status' },
+  { label: 'Amount', value: (row) => formatMoney(row.total_amount), align: 'right' },
+]
+
+export const monthlyRevenueExportColumns = [
+  { label: 'Month', key: 'month' },
+  { label: 'Room', value: (row) => formatMoney(row.room), align: 'right' },
+  { label: 'POS', value: (row) => formatMoney(row.pos), align: 'right' },
+  { label: 'Total revenue', value: (row) => formatMoney(row.revenue), align: 'right' },
+]
+
+export function monthlyRevenueColumnsFor({ includeRoom = true, includePos = true } = {}) {
+  const cols = [{ label: 'Month', key: 'month' }]
+  if (includeRoom) cols.push({ label: 'Room', value: (row) => formatMoney(row.room), align: 'right' })
+  if (includePos) cols.push({ label: 'POS', value: (row) => formatMoney(row.pos), align: 'right' })
+  cols.push({ label: 'Total revenue', value: (row) => formatMoney(row.revenue), align: 'right' })
+  return cols
+}
+
+export const monthlyProfitExportColumns = [
+  { label: 'Month', key: 'month' },
+  { label: 'Room', value: (row) => formatMoney(row.room), align: 'right' },
+  { label: 'POS', value: (row) => formatMoney(row.pos), align: 'right' },
+  { label: 'Total revenue', value: (row) => formatMoney(row.revenue), align: 'right' },
+  { label: 'Expenses', value: (row) => formatMoney(row.expenses), align: 'right' },
+  { label: 'Net profit', value: (row) => formatMoney(row.profit), align: 'right' },
+]
+
+export function monthlyProfitColumnsFor({ includeRoom = true, includePos = true } = {}) {
+  const cols = [{ label: 'Month', key: 'month' }]
+  if (includeRoom) cols.push({ label: 'Room', value: (row) => formatMoney(row.room), align: 'right' })
+  if (includePos) cols.push({ label: 'POS', value: (row) => formatMoney(row.pos), align: 'right' })
+  cols.push(
+    { label: 'Total revenue', value: (row) => formatMoney(row.revenue), align: 'right' },
+    { label: 'Expenses', value: (row) => formatMoney(row.expenses), align: 'right' },
+    { label: 'Net profit', value: (row) => formatMoney(row.profit), align: 'right' },
+  )
+  return cols
+}
+
+export const expenseRegisterExportColumns = [
+  { label: 'Date', value: (row) => formatDate(expenseFinanceDate(row)) },
+  { label: 'Description', value: (row) => row.description || '—' },
+  { label: 'Category', value: (row) => row.category || '—' },
+  { label: 'Payment', value: (row) => String(row.payment_method || 'other').replaceAll('_', ' ') },
+  { label: 'Amount', value: (row) => formatMoney(row.amount), align: 'right' },
+]

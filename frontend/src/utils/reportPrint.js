@@ -67,10 +67,53 @@ function reportMeta({ title, from, to, exportedBy, exportedAt }) {
   }
 }
 
-export function buildReportCsv({ title, from, to, exportedBy, rows, columns } = {}) {
+function tableSections(options = {}) {
+  if (Array.isArray(options.sections) && options.sections.length) return options.sections
+  if (Array.isArray(options.columns) && options.columns.length) {
+    return [{ title: '', columns: options.columns, rows: options.rows || [] }]
+  }
+  return []
+}
+
+function renderTable(section) {
+  const cols = section.columns || []
+  const list = section.rows || []
+  const head = cols
+    .map((col) => `<th class="${col.align === 'right' ? 'num' : ''}">${escapeHtml(col.label)}</th>`)
+    .join('')
+  const body = list.length
+    ? list
+        .map(
+          (row) =>
+            `<tr>${cols
+              .map((col) => `<td class="${col.align === 'right' ? 'num' : ''}">${escapeHtml(cellText(row, col))}</td>`)
+              .join('')}</tr>`
+        )
+        .join('')
+    : `<tr><td colspan="${Math.max(cols.length, 1)}">No rows in this period.</td></tr>`
+  const heading = section.title ? `<h2>${escapeHtml(section.title)}</h2>` : ''
+  return `${heading}<table>
+    <thead><tr>${head}</tr></thead>
+    <tbody>${body}</tbody>
+  </table>`
+}
+
+function renderStatement(lines) {
+  if (!lines?.length) return ''
+  const rows = lines
+    .map((line) => {
+      if (line.kind === 'blank') return '<tr class="pnl-blank"><td colspan="2"></td></tr>'
+      if (line.kind === 'header') return `<tr class="pnl-head"><td colspan="2">${escapeHtml(line.label)}</td></tr>`
+      if (line.kind === 'note') return `<tr class="pnl-note"><td colspan="2">${escapeHtml(line.label)}</td></tr>`
+      const cls = [line.kind === 'total' ? 'pnl-total' : '', line.indent ? 'indent' : ''].filter(Boolean).join(' ')
+      return `<tr class="${cls}"><td>${escapeHtml(line.label)}</td><td class="num">${escapeHtml(line.value ?? '')}</td></tr>`
+    })
+    .join('')
+  return `<table class="pnl"><tbody>${rows}</tbody></table>`
+}
+
+export function buildReportCsv({ title, from, to, exportedBy, rows, columns, statement, sections } = {}) {
   const meta = reportMeta({ title, from, to, exportedBy })
-  const list = Array.isArray(rows) ? rows : []
-  const cols = Array.isArray(columns) ? columns : []
   const lines = [
     csvEscape(meta.hotel),
     csvEscape(meta.title),
@@ -78,9 +121,29 @@ export function buildReportCsv({ title, from, to, exportedBy, rows, columns } = 
     `${csvEscape('Exported by')},${csvEscape(meta.exportedBy)}`,
     `${csvEscape('Exported at')},${csvEscape(meta.exportedAt)}`,
     '',
-    cols.map((col) => csvEscape(col.label)).join(','),
-    ...list.map((row) => cols.map((col) => csvEscape(cellText(row, col))).join(',')),
   ]
+  if (statement?.length) {
+    lines.push(`${csvEscape('Account')},${csvEscape('Amount')}`)
+    for (const line of statement) {
+      if (line.kind === 'blank') lines.push('')
+      else if (line.kind === 'header' || line.kind === 'note') lines.push(csvEscape(line.label))
+      else lines.push(`${csvEscape(line.label)},${csvEscape(line.value ?? '')}`)
+    }
+    lines.push('')
+  }
+  for (const section of tableSections({ rows, columns, sections })) {
+    if (section.title) {
+      lines.push(csvEscape(section.title))
+    }
+    const cols = section.columns || []
+    lines.push(cols.map((col) => csvEscape(col.label)).join(','))
+    const list = section.rows || []
+    if (!list.length) lines.push('No rows in this period.')
+    else {
+      for (const row of list) lines.push(cols.map((col) => csvEscape(cellText(row, col))).join(','))
+    }
+    lines.push('')
+  }
   return `\uFEFF${lines.join('\n')}`
 }
 
@@ -99,14 +162,8 @@ export function downloadReportCsv(options = {}) {
 
 function buildReportHtml(options = {}, { preview } = {}) {
   const meta = reportMeta(options)
-  const list = Array.isArray(options.rows) ? options.rows : []
-  const cols = Array.isArray(options.columns) ? options.columns : []
-  const head = cols.map((col) => `<th>${escapeHtml(col.label)}</th>`).join('')
-  const body = list.length
-    ? list
-        .map((row) => `<tr>${cols.map((col) => `<td>${escapeHtml(cellText(row, col))}</td>`).join('')}</tr>`)
-        .join('')
-    : `<tr><td colspan="${Math.max(cols.length, 1)}">No rows in this period.</td></tr>`
+  const statementHtml = renderStatement(options.statement)
+  const tablesHtml = tableSections(options).map(renderTable).join('')
   const toolbar = preview
     ? `<div class="toolbar">
         <p>Preview — close this window when you are done, or save as PDF.</p>
@@ -131,9 +188,18 @@ function buildReportHtml(options = {}, { preview } = {}) {
     .range { margin: 6px 0 0; font-size: 13px; color: #57534e; }
     .byline { text-align: right; margin: 0 0 10px; font-size: 12px; color: #44403c; line-height: 1.45; }
     .byline p { margin: 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    h2 { font-size: 13px; margin: 22px 0 8px; text-transform: uppercase; letter-spacing: 0.04em; color: #44403c; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
     th, td { padding: 7px 6px; border-bottom: 1px solid #e7e5e4; text-align: left; vertical-align: top; }
     th { font-size: 11px; text-transform: uppercase; color: #57534e; border-bottom: 1px solid #a8a29e; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.pnl { max-width: 36rem; margin-left: auto; }
+    table.pnl td { border-bottom: 1px dotted #e7e5e4; }
+    tr.pnl-head td { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; padding-top: 12px; border-bottom: 1px solid #a8a29e; }
+    tr.indent td:first-child { padding-left: 18px; }
+    tr.pnl-total td { font-weight: 700; border-top: 1px solid #1c1917; border-bottom: 2px solid #1c1917; }
+    tr.pnl-blank td { border: 0; height: 10px; }
+    tr.pnl-note td { color: #78716c; font-size: 11px; border: 0; padding-top: 12px; }
     @media print { body { padding: 12px; } .toolbar { display: none !important; } }
   </style>
 </head>
@@ -148,10 +214,8 @@ function buildReportHtml(options = {}, { preview } = {}) {
     <p>${escapeHtml(meta.exportedBy)}</p>
     <p>${escapeHtml(meta.exportedAt)}</p>
   </div>
-  <table>
-    <thead><tr>${head}</tr></thead>
-    <tbody>${body}</tbody>
-  </table>
+  ${statementHtml}
+  ${tablesHtml}
 </body>
 </html>`
 }

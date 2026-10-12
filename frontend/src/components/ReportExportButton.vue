@@ -38,7 +38,9 @@ const props = defineProps({
   from: { type: String, default: '' },
   to: { type: String, default: '' },
   rows: { type: Array, default: () => [] },
-  columns: { type: Array, required: true },
+  columns: { type: Array, default: () => [] },
+  statement: { type: Array, default: () => [] },
+  sections: { type: Array, default: () => [] },
   disabled: { type: Boolean, default: false },
 })
 
@@ -57,6 +59,8 @@ function payload() {
     exportedBy: who || 'Staff',
     rows: props.rows,
     columns: props.columns,
+    statement: props.statement,
+    sections: props.sections,
   }
 }
 
