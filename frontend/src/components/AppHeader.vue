@@ -1,8 +1,8 @@
 <template>
   <header class="sticky top-0 z-50 border-b border-stone-200/80 bg-warm-50/95 backdrop-blur-sm dark:border-stone-700 dark:bg-stone-950/95">
-    <div class="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:px-6">
-      <router-link to="/" class="font-display text-xl font-semibold text-brand-700 dark:text-brand-300">
-        Smile Hotel MS
+    <div class="mx-auto flex h-[4.5rem] max-w-6xl items-center gap-4 px-4 sm:px-6">
+      <router-link to="/" class="shrink-0 text-brand-700 dark:text-brand-300" aria-label="Smile Hotel MS">
+        <BrandLogo mark-class="h-16 w-16" />
       </router-link>
 
       <nav class="hidden flex-1 items-center justify-center gap-6 text-sm font-medium lg:flex">
@@ -94,6 +94,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAuth } from '../composables/useAuth'
 import { useRouter, useRoute } from 'vue-router'
+import BrandLogo from './BrandLogo.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import ConfirmModal from './ConfirmModal.vue'
 import { getNotifications } from '../services/data'

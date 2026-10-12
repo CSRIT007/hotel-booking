@@ -3,7 +3,9 @@
     <div class="mx-auto max-w-6xl px-4 sm:px-6">
       <div class="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <h3 class="font-display text-xl font-semibold text-white">Smile Hotel MS</h3>
+          <h3 class="text-white">
+            <BrandLogo mark-class="h-24 w-24" />
+          </h3>
           <p class="mt-3 max-w-sm text-sm leading-relaxed text-stone-400">
             Comfortable rooms and warm hospitality in Phnom Penh.
           </p>
@@ -55,4 +57,5 @@
 
 <script setup>
 import { policyLinks } from '../constants/policies'
+import BrandLogo from './BrandLogo.vue'
 </script>

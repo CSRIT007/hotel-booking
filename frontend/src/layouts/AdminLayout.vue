@@ -5,8 +5,10 @@
       class="fixed inset-y-0 left-0 z-40 w-64 flex flex-col border-r border-stone-200 bg-stone-800 text-white transition-transform lg:translate-x-0 dark:border-stone-800 dark:bg-stone-950"
       :class="{ '-translate-x-full': !sidebarOpen }"
     >
-      <div class="flex h-14 items-center justify-between border-b border-stone-700 px-4">
-        <router-link to="/admin" class="font-semibold text-white">Smile Hotel MS</router-link>
+      <div class="flex h-16 items-center justify-between border-b border-stone-700 px-4">
+        <router-link to="/admin" class="text-white" aria-label="Smile Hotel MS">
+          <BrandLogo mark-class="h-12 w-12" />
+        </router-link>
         <button type="button" class="lg:hidden rounded p-2 hover:bg-stone-700" @click="sidebarOpen = false" aria-label="Close menu">
           <span class="text-lg">×</span>
         </button>
