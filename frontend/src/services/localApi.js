@@ -320,6 +320,24 @@ export async function getPosProducts() {
   return Array.isArray(data) ? data : []
 }
 
+export async function createPosProduct(payload) {
+  try {
+    const { data } = await client.post('/api/pos-products', payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to add product')
+  }
+}
+
+export async function updatePosProduct(id, payload) {
+  try {
+    const { data } = await client.patch(`/api/pos-products/${id}`, payload)
+    return data
+  } catch (e) {
+    throwApiError(e, 'Failed to update product')
+  }
+}
+
 // POS Transactions (admin, from PostgreSQL)
 export async function getPosTransactions() {
   const { data } = await client.get('/api/pos-transactions')

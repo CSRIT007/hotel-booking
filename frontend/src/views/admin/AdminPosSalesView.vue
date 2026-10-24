@@ -14,11 +14,11 @@
             <select
               v-model="form.product_id"
               class="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              :disabled="submitting || products.length === 0"
+              :disabled="submitting || saleProducts.length === 0"
               required
             >
               <option value="" disabled>Select product</option>
-              <option v-for="p in products" :key="p.id" :value="p.id">
+              <option v-for="p in saleProducts" :key="p.id" :value="String(p.id)">
                 {{ p.name }} — {{ formatMoney(p.price) }} (stock: {{ p.stock ?? '—' }})
               </option>
             </select>
@@ -84,8 +84,8 @@
           </div>
         </form>
 
-        <p v-if="products.length === 0 && !loading" class="mt-4 text-xs text-stone-500">
-          No POS products found. Add products in the database to record sales.
+        <p v-if="saleProducts.length === 0 && !loading" class="mt-4 text-xs text-stone-500">
+          No active products. Add one under POS → Products, then return here to sell it.
         </p>
       </div>
 
@@ -195,8 +195,12 @@ const averageTicket = computed(() => {
   return totalRevenue.value / transactions.value.length
 })
 
+const saleProducts = computed(() =>
+  products.value.filter((p) => (p.status || 'active') === 'active')
+)
+
 const formTotal = computed(() => {
-  const product = products.value.find((p) => String(p.id) === String(form.value.product_id))
+  const product = saleProducts.value.find((p) => String(p.id) === String(form.value.product_id))
   if (!product) return 0
   const price = Number(product.price || 0)
   const qty = Number(form.value.quantity || 0)
@@ -261,11 +265,18 @@ async function submitSale() {
       p.stock = Math.max(0, p.stock - Number(form.value.quantity || 0))
     }
     formSuccess.value = 'Sale recorded.'
-    form.value.quantity = 1
+    resetSaleForm()
   } catch (e) {
     formError.value = e.message || 'Failed to record sale.'
   }
   submitting.value = false
+}
+
+function resetSaleForm() {
+  form.value.product_id = ''
+  form.value.quantity = 1
+  form.value.payment_method = 'cash'
+  form.value.status = 'paid'
 }
 
 onMounted(async () => {
@@ -274,6 +285,7 @@ onMounted(async () => {
     const [tx, prods] = await Promise.all([getPosTransactions(), getPosProducts()])
     transactions.value = tx
     products.value = prods
+    resetSaleForm()
   } catch (e) {
     console.warn(e)
   }

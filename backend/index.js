@@ -1780,6 +1780,76 @@ app.get('/api/pos-products', async (_req, res) => {
   }
 })
 
+app.post('/api/pos-products', async (req, res) => {
+  try {
+    if (!requireStaff(req, res)) return
+    const name = String(req.body?.name || '').trim()
+    const category = String(req.body?.category || '').trim() || null
+    const price = Number(req.body?.price)
+    const stock = parseInt(req.body?.stock, 10)
+    const status = String(req.body?.status || 'active')
+    if (!name) return res.status(400).json({ error: 'Product name is required.' })
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Price must be 0 or more.' })
+    if (!Number.isFinite(stock) || stock < 0) return res.status(400).json({ error: 'Stock must be 0 or more.' })
+    if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Status must be active or inactive.' })
+    const r = await pool.query(
+      `INSERT INTO pos_products (name, category, price, stock, status)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, category, price, stock, status, created_at`,
+      [name, category, price, stock, status]
+    )
+    const product = r.rows[0]
+    await writeAudit(req, {
+      action: 'create',
+      entity: 'pos_product',
+      entityId: product.id,
+      summary: `POS product ${product.name} (stock ${product.stock})`,
+    })
+    res.status(201).json(product)
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to add product' })
+  }
+})
+
+app.patch('/api/pos-products/:id', async (req, res) => {
+  try {
+    if (!requireStaff(req, res)) return
+    const currentQ = await pool.query(
+      'SELECT id, name, category, price, stock, status, created_at FROM pos_products WHERE id = $1',
+      [req.params.id]
+    )
+    const current = currentQ.rows[0]
+    if (!current) return res.status(404).json({ error: 'Product not found.' })
+    const body = req.body || {}
+    const name = body.name != null ? String(body.name).trim() : current.name
+    const category = body.category != null ? (String(body.category).trim() || null) : current.category
+    const price = body.price != null ? Number(body.price) : Number(current.price)
+    const stock = body.stock != null ? parseInt(body.stock, 10) : Number(current.stock)
+    const status = body.status != null ? String(body.status) : current.status
+    if (!name) return res.status(400).json({ error: 'Product name is required.' })
+    if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Price must be 0 or more.' })
+    if (!Number.isFinite(stock) || stock < 0) return res.status(400).json({ error: 'Stock must be 0 or more.' })
+    if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Status must be active or inactive.' })
+    const r = await pool.query(
+      `UPDATE pos_products
+       SET name = $1, category = $2, price = $3, stock = $4, status = $5
+       WHERE id = $6
+       RETURNING id, name, category, price, stock, status, created_at`,
+      [name, category, price, stock, status, req.params.id]
+    )
+    const product = r.rows[0]
+    await writeAudit(req, {
+      action: 'update',
+      entity: 'pos_product',
+      entityId: product.id,
+      summary: `POS product ${product.name} (stock ${product.stock})`,
+    })
+    res.json(product)
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to update product' })
+  }
+})
+
 // POS Transactions (admin — used by POS Sales & POS Transactions pages)
 app.get('/api/pos-transactions', async (_req, res) => {
   try {

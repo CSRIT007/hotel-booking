@@ -402,6 +402,28 @@ export async function getPosProducts(params = {}) {
   return []
 }
 
+export async function createPosProduct(payload) {
+  if (hasLocalApi) {
+    try {
+      return await localApi.createPosProduct(payload)
+    } catch (e) {
+      throw new Error(e.response?.data?.error || e.message || 'Failed to add product')
+    }
+  }
+  throw new Error('No API configured')
+}
+
+export async function updatePosProduct(id, payload) {
+  if (hasLocalApi) {
+    try {
+      return await localApi.updatePosProduct(id, payload)
+    } catch (e) {
+      throw new Error(e.response?.data?.error || e.message || 'Failed to update product')
+    }
+  }
+  throw new Error('No API configured')
+}
+
 export async function getPosTransactions(params = {}) {
   if (hasLocalApi) {
     try {
